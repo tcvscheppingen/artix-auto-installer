@@ -1,0 +1,7 @@
+# Native (arm64 on Apple Silicon) QEMU that emulates an x86_64 laptop:
+# UEFI (OVMF), q35 chipset, NVMe disk, Intel e1000e NIC.
+FROM debian:stable-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf expect \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /work

@@ -1,0 +1,16 @@
+# Imitates the Artix base dinit live ISO as far as a container can:
+# same repos, artools (basestrap, artix-chroot, fstabgen), cryptsetup, kbd...
+FROM --platform=linux/amd64 artixlinux/artixlinux:latest
+
+# The Docker image strips locales, man pages etc. via NoExtract. basestrap
+# uses this pacman.conf for the new system too, so remove those rules
+# (the ISO doesn't have them).
+RUN sed -i '/^NoExtract/d' /etc/pacman.conf \
+ && pacman-key --init && pacman-key --populate artix \
+ && pacman -Syu --noconfirm \
+ && pacman -S --noconfirm --needed artools-base cryptsetup dosfstools e2fsprogs \
+        util-linux curl kbd glibc which \
+ && pacman -S --noconfirm glibc \
+ && pacman -Scc --noconfirm
+
+WORKDIR /work

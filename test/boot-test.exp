@@ -1,0 +1,69 @@
+#!/usr/bin/expect -f
+# Boots the installed disk like a ThinkPad: UEFI (OVMF, empty NVRAM, so the
+# fallback \EFI\BOOT\BOOTX64.EFI is used), q35, NVMe, Intel e1000e NIC.
+# The emulated (TCG) CPU makes everything slow; timeouts are generous.
+set timeout 900
+log_file -noappend /logs/boot.log
+
+set luks "luks-test-passphrase"
+set user "tester"
+set pass "user pass 123"
+
+exec cp /usr/share/OVMF/OVMF_VARS_4M.fd /tmp/vars.fd
+spawn qemu-system-x86_64 -machine q35 -cpu max -smp 4 -m 4096 \
+    -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+    -drive if=pflash,format=raw,file=/tmp/vars.fd \
+    -drive file=/out/disk.img,if=none,id=nvm,format=raw \
+    -device nvme,serial=T14S-NVME,drive=nvm \
+    -netdev user,id=n0 -device e1000e,netdev=n0 \
+    -nographic -no-reboot
+
+proc fail {msg} { puts "\nBOOT TEST FAILED: $msg"; exit 1 }
+
+expect {
+    "Enter passphrase for" {}
+    "unable to find root device" { fail "no root device (encrypt hook / cryptdevice)" }
+    "Kernel panic" { fail "kernel panic" }
+    timeout { fail "no passphrase prompt" }
+}
+puts "\n>>> TEST: passphrase prompt reached, typing passphrase"
+sleep 1
+send -- "$luks\r"
+
+expect {
+    -re "No key available|Device .* doesn't exist" { fail "LUKS unlock failed" }
+    "login:" {}
+    timeout { fail "no login prompt after unlock" }
+}
+puts "\n>>> TEST: login prompt reached"
+sleep 5
+send -- "$user\r"
+expect "Password:"
+send -- "$pass\r"
+expect {
+    -re {\]\$} {}
+    "Login incorrect" { fail "login failed" }
+    timeout { fail "no shell prompt" }
+}
+puts "\n>>> TEST: logged in"
+# A plain prompt is easier to match than Artix's colored one
+send -- "PS1='READY> '\r"
+expect "READY> "
+send -- "sudo /usr/local/bin/boot-checks.sh\r"
+expect "password for $user"
+send -- "$pass\r"
+expect {
+    -re {BOOT CHECKS: (\d+) passed, (\d+) failed} {
+        set failed $expect_out(2,string)
+    }
+    timeout { fail "boot checks did not finish" }
+}
+expect "READY> "
+send -- "sudo poweroff\r"
+expect {
+    "password for" { send -- "$pass\r"; exp_continue }
+    eof {}
+    timeout {}
+}
+if {$failed != 0} { puts "\nBOOT TEST: $failed check(s) failed"; exit 1 }
+puts "\nBOOT TEST PASSED"
