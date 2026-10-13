@@ -121,6 +121,42 @@ enable_service() {
     ENABLED_SERVICES+=("$svc")
 }
 
+# The X layout (and variant) for a console keymap, empty when unknown. X
+# doesn't read /etc/vconsole.conf; on systemd systems localectl writes this.
+x11_layout() {
+    case $1 in
+        us)                   echo "us" ;;
+        us-acentos)           echo "us intl" ;;
+        uk)                   echo "gb" ;;
+        dvorak)               echo "us dvorak" ;;
+        colemak)              echo "us colemak" ;;
+        de|de-latin1)         echo "de" ;;
+        de-latin1-nodeadkeys) echo "de nodeadkeys" ;;
+        fr|fr-latin1|fr-latin9) echo "fr" ;;
+        be-latin1)            echo "be" ;;
+        nl)                   echo "nl" ;;
+        es)                   echo "es" ;;
+        it)                   echo "it" ;;
+        pt-latin1)            echo "pt" ;;
+        br-abnt2)             echo "br" ;;
+        dk|dk-latin1)         echo "dk" ;;
+        no|no-latin1)         echo "no" ;;
+        sv-latin1)            echo "se" ;;
+        fi)                   echo "fi" ;;
+        pl|pl2)               echo "pl" ;;
+        cz)                   echo "cz" ;;
+        hu)                   echo "hu" ;;
+        ru)                   echo "ru" ;;
+    esac
+}
+
+# KEY=VALUE in the new system's /etc/default/grub, also when the setting is
+# there commented out
+grub_set() {
+    sed -i "/^#\?$1=/d" "$MNT/etc/default/grub"
+    echo "$1=$2" >> "$MNT/etc/default/grub"
+}
+
 # Without udev (containers) partition nodes never appear; make them from sysfs
 wait_for_partitions() {
     local disk=$1 dev name i major minor
@@ -464,7 +500,7 @@ while :; do
 done
 
 info ""
-info "The LTS kernel is a second boot entry (GRUB > Advanced options) you can"
+info "The LTS kernel is a second entry in the GRUB menu, which you can"
 info "use when an update of the normal kernel doesn't boot."
 ask_yes_no INSTALL_LTS "Install the linux-lts fallback kernel?" y
 
@@ -685,6 +721,19 @@ done
 in_chroot locale-gen
 echo "LANG=$LOCALE" > "$MNT/etc/locale.conf"
 echo "KEYMAP=$KEYMAP" > "$MNT/etc/vconsole.conf"
+read -r X11_LAYOUT X11_VARIANT <<< "$(x11_layout "$KEYMAP")" || true
+if [[ -n $X11_LAYOUT ]]; then
+    mkdir -p "$MNT/etc/X11/xorg.conf.d"
+    {
+        echo '# The keyboard layout in X, matching the console keymap (artix-install.sh)'
+        echo 'Section "InputClass"'
+        echo '    Identifier "system-keyboard"'
+        echo '    MatchIsKeyboard "on"'
+        echo "    Option \"XkbLayout\" \"$X11_LAYOUT\""
+        if [[ -n $X11_VARIANT ]]; then echo "    Option \"XkbVariant\" \"$X11_VARIANT\""; fi
+        echo 'EndSection'
+    } > "$MNT/etc/X11/xorg.conf.d/00-keyboard.conf"
+fi
 
 echo "$HOST_NAME" > "$MNT/etc/hostname"
 cat > "$MNT/etc/hosts" << EOF
@@ -711,16 +760,15 @@ ok "Initramfs built"
 step "Installing GRUB"
 cmdline="cryptdevice=UUID=$LUKS_UUID:$CRYPT_NAME root=/dev/mapper/$CRYPT_NAME"
 [[ -n $EXTRA_KERNEL_PARAMS ]] && cmdline+=" $EXTRA_KERNEL_PARAMS"
-if grep -q '^GRUB_CMDLINE_LINUX=' "$MNT/etc/default/grub"; then
-    sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"$cmdline\"|" "$MNT/etc/default/grub"
-else
-    echo "GRUB_CMDLINE_LINUX=\"$cmdline\"" >> "$MNT/etc/default/grub"
-fi
-sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/; s/^#\?GRUB_SAVEDEFAULT=.*/GRUB_SAVEDEFAULT=true/' "$MNT/etc/default/grub"
-grep -q '^GRUB_SAVEDEFAULT=' "$MNT/etc/default/grub" || echo 'GRUB_SAVEDEFAULT=true' >> "$MNT/etc/default/grub"
+grub_set GRUB_CMDLINE_LINUX "\"$cmdline\""
+grub_set GRUB_DEFAULT saved
+grub_set GRUB_SAVEDEFAULT true
 # Otherwise grub-mkconfig puts linux-lts first
-sed -i '/^#\?GRUB_TOP_LEVEL=/d' "$MNT/etc/default/grub"
-echo 'GRUB_TOP_LEVEL="/boot/vmlinuz-linux"' >> "$MNT/etc/default/grub"
+grub_set GRUB_TOP_LEVEL '"/boot/vmlinuz-linux"'
+# Just the kernels and UEFI settings: no submenu, and no entry for every
+# firmware boot option (the install USB, network boot...)
+grub_set GRUB_DISABLE_SUBMENU y
+grub_set GRUB_DISABLE_BOOTNEXT true
 
 if [[ $BOOT_MODE == UEFI && $TEST_IN_CONTAINER != yes ]]; then
     in_chroot grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=artix
@@ -872,11 +920,12 @@ Installed on $(date '+%F %R %Z') with artix-install.sh $SCRIPT_VERSION.
 
 - Host name: $HOST_NAME
 - Kernels: $KERNELS
-- Fallback kernel: $([[ $INSTALL_LTS == yes ]] && echo "linux-lts, in GRUB under Advanced options for Artix Linux" || echo none)
+- Fallback kernel: $([[ $INSTALL_LTS == yes ]] && echo "linux-lts, the second entry in the GRUB menu" || echo none)
 - Bootloader: GRUB, EFI entry "artix" and the fallback path \\EFI\\BOOT\\BOOTX64.EFI
 - Init: dinit; enabled services (/etc/dinit.d/boot.d): ${ENABLED_SERVICES[*]}
 - Locale: $LOCALE
 - Console keymap: $KEYMAP, also used at the passphrase prompt
+- Keyboard in X: $(if [[ -n $X11_LAYOUT ]]; then echo "$X11_LAYOUT${X11_VARIANT:+ ($X11_VARIANT)}, in /etc/X11/xorg.conf.d/00-keyboard.conf"; else echo "not set (no X layout known for $KEYMAP); set it in /etc/X11/xorg.conf.d/00-keyboard.conf"; fi)
 - Time zone: $TIMEZONE
 - Mirrors: ranked at install time; the stock list is /etc/pacman.d/mirrorlist.stock
 - AUR: $([[ $ENABLE_AUR == yes ]] && echo "yay installed. AUR packages are unofficial, review their PKGBUILDs ($AUR_WIKI)" || echo "not enabled")

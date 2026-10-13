@@ -45,12 +45,15 @@ check "GRUB fallback BOOTX64.EFI"              test -f $M/boot/EFI/BOOT/BOOTX64.
 check "grub.cfg has cryptdevice=UUID=$LUUID"   grep -q "cryptdevice=UUID=$LUUID:$CRYPT_NAME root=/dev/mapper/$CRYPT_NAME" $M/boot/grub/grub.cfg
 check "first GRUB entry boots the main kernel" sh -c "grep -m1 -E '^\s*linux\s' $M/boot/grub/grub.cfg | grep -q 'vmlinuz-linux '"
 check "grub.cfg has linux-lts entry"           grep -q 'vmlinuz-linux-lts' $M/boot/grub/grub.cfg
+check "GRUB: no submenu, no BootNext entries"  sh -c "! grep -q '^submenu' $M/boot/grub/grub.cfg && grep -qx 'GRUB_DISABLE_BOOTNEXT=true' $M/etc/default/grub"
+check "GRUB: two kernels and UEFI settings"    sh -c "[ \$(grep -cE '^\s*menuentry ' $M/boot/grub/grub.cfg) -eq 3 ]"
 
 echo "== Configuration"
 check "hostname"                               grep -qx "$HOST_NAME" $M/etc/hostname
 check "locale.conf"                            grep -qx "LANG=$LOCALE" $M/etc/locale.conf
 check "locale generated"                       sh -c "chroot $M locale -a | grep -qi 'en_US.utf8'"
 check "vconsole keymap"                        grep -qx "KEYMAP=$KEYMAP" $M/etc/vconsole.conf
+check "X keyboard: us international"           sh -c "grep -q 'XkbLayout\" \"us\"' $M/etc/X11/xorg.conf.d/00-keyboard.conf && grep -q 'XkbVariant\" \"intl\"' $M/etc/X11/xorg.conf.d/00-keyboard.conf"
 check "timezone"                               sh -c "readlink $M/etc/localtime | grep -q '$TIMEZONE'"
 check "user exists in wheel"                   sh -c "chroot $M id -nG $USER_NAME | grep -qw wheel"
 check "user password is set (hash)"            sh -c "grep '^$USER_NAME:' $M/etc/shadow | cut -d: -f2 | grep -q '^\\\$'"

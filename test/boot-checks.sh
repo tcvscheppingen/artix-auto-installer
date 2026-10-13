@@ -20,7 +20,8 @@ check "ufw active, deny incoming"       sh -c "ufw status verbose | grep -q 'Sta
 check "iptables has ufw chains"         sh -c "iptables -S | grep -q ufw-user-input"
 check "network: DHCP address"           sh -c "for i in \$(seq 30); do ip -4 addr | grep -q 'inet 10.0.2' && exit 0; sleep 2; done; exit 1"
 check "network: DNS + HTTPS"            sh -c "curl -fsS --max-time 20 -o /dev/null https://artixlinux.org"
-check "keymap loaded from vconsole"     grep -qx 'KEYMAP=us-acentos' /etc/vconsole.conf
+# us-acentos has dead keys, plain us doesn't
+check "console keymap us-acentos active" sh -c "dumpkeys -C /dev/tty1 | grep -q dead_acute"
 check "user is in wheel"                sh -c "id -nG tester | grep -qw wheel"
 check "sudoers grants tester (ALL : ALL)" sh -c "sudo -l -U tester | grep -q '(ALL : ALL) ALL'"
 check "root password locked"            sh -c "passwd -S root | awk '{print \$2}' | grep -qx L"
@@ -53,8 +54,8 @@ if [ -x /usr/local/bin/dwm ]; then
     check "Xorg starts and stops cleanly"   sh -c "timeout 180 xinit /bin/true -- :1 vt7 -logfile /tmp/Xorg.test.log; grep -q 'Server terminated successfully' /tmp/Xorg.test.log"
     grep -E '\((EE|WW)\)' /tmp/Xorg.test.log 2> /dev/null | head -n 5
 
-    # The DARBS session as tester, with st running htop, for the report's
-    # screenshot. /var/tmp: the test copies it off the disk after poweroff.
+    # The DARBS session as tester, with st running htop and Thunar, for the
+    # report's screenshot. /var/tmp: the test copies it off the disk after poweroff.
     rm -f /var/tmp/darbs-screenshot.png
     uid=$(id -u tester)
     XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus \
@@ -62,8 +63,12 @@ if [ -x /usr/local/bin/dwm ]; then
         > /tmp/dwm-session.log 2>&1 &
     check "dwm session starts"              sh -c "for i in \$(seq 60); do pgrep -u tester -x dwm && exit 0; sleep 2; done; exit 1"
     su tester -c 'DISPLAY=:2 st -e htop' > /dev/null 2>&1 &
+    # Thunar shows whether GTK 3 apps get the dark theme
+    su tester -c "DISPLAY=:2 XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus thunar" > /dev/null 2>&1 &
     # Time for the wallpaper, bar and st on the slow emulated CPU
     sleep 30
+    check "X keyboard: us international"    grep -q 'XkbVariant.*intl' /tmp/Xorg.dwm.log
+    check "Thunar opens"                    sh -c "pgrep -u tester -x thunar"
     check "screenshot of dwm"               su tester -c 'DISPLAY=:2 maim /var/tmp/darbs-screenshot.png'
     pkill -x xinit
     sleep 3
