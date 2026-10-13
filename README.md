@@ -31,8 +31,3 @@ cd artix-auto-installer
 To preset some or all answers, copy `install.conf.example`, fill it in and run `./artix-install.sh --config install.conf`. Anything you leave empty is asked for.
 
 If you want to test the installation script you can do so by running `test/run-container-test.sh`
-
-## Disclaimer
-I wrote this script with assistance from a Large Language Model.   
-I have reviewed the script in its entirety and validated it by running it in a VM.
-
