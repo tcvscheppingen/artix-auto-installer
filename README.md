@@ -1,10 +1,10 @@
 # Artix Auto Installer
 Personal script for installing Artix Linux with Dinit
 
-After having installed Aritx/Arch manually multiple times, I wanted to automate the installation.
-That is why I created this script. The default locale and keymap are not useful for everybody, but can be changed during the installation.
+After having installed Aritx/Arch manually multiple times, I wanted to automate the installation, so I created this script
+The default locale and keymap are my own preferences, but can be changed during the installation.
 
-The installation script is designed to work on a UEFI Lenovo ThinkPad.
+The installation script is designed to work on a UEFI Lenovo ThinkPad, but will likely work on other systems as well.
 
 The script will do the following:
 - Install Artix Linux with Dinit as the init system and with an encrypted root partition.
