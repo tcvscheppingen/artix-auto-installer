@@ -26,7 +26,7 @@ Boot the Artix **base dinit** ISO in UEFI mode with Secure Boot off, log in as `
 pacman -Sy git
 git clone https://github.com/tcvscheppingen/artix-auto-installer.git
 cd artix-auto-installer
-chmod +x artix-auto-installer
+chmod +x artix-install.sh
 ./artix-install.sh
 ```
 To preset some or all answers, copy `install.conf.example`, fill it in and run `./artix-install.sh --config install.conf`. Anything you leave empty is asked for.
