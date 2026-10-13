@@ -6,7 +6,7 @@
 #   * UEFI only, GPT, 1 GiB unencrypted EFI partition mounted at /boot
 #   * LUKS2 encrypted root (ext4); the initramfs asks for the passphrase
 #   * GRUB, NetworkManager, chrony, ufw firewall (deny incoming)
-#   * optional: linux-lts fallback kernel, Timeshift snapshots, yay (AUR)
+#   * optional: linux-lts fallback kernel, yay (AUR)
 #
 # Made for the ThinkPad T14s Gen 2 (Intel or AMD) and other recent
 # ThinkPads. Run it as root from the Artix base dinit live ISO. Afterwards,
@@ -28,9 +28,7 @@ readonly LOG=/tmp/artix-install.log
 readonly AUR_WIKI="https://wiki.archlinux.org/title/Arch_User_Repository"
 readonly DARBS_URL="https://github.com/tcvscheppingen/DARBS"
 
-# ---------------------------------------------------------------------------
-# Output helpers
-# ---------------------------------------------------------------------------
+# --- Output helpers ---
 
 if [[ -t 1 ]]; then
     C_RED=$'\e[31m'; C_GRN=$'\e[32m'; C_YLW=$'\e[33m'; C_BLU=$'\e[1;34m'; C_RST=$'\e[0m'
@@ -44,10 +42,7 @@ ok()   { printf '%s  ✓ %s%s\n' "$C_GRN" "$*" "$C_RST"; }
 warn() { printf '%s  ! %s%s\n' "$C_YLW" "$*" "$C_RST" >&2; }
 die()  { printf '%sERROR: %s%s\n' "$C_RED" "$*" "$C_RST" >&2; exit 1; }
 
-# ---------------------------------------------------------------------------
-# Prompt helpers. Each one only asks when the variable is still empty, so
-# answers can be preset from a config file or the environment.
-# ---------------------------------------------------------------------------
+# --- Prompt helpers: they only ask when the variable is still empty ---
 
 # ask VAR "Question" [default]
 ask() {
@@ -106,27 +101,20 @@ ask_password() {
     _pw=$p1
 }
 
-# ---------------------------------------------------------------------------
-# Misc helpers
-# ---------------------------------------------------------------------------
+# --- Misc helpers ---
 
 # Partition device name: /dev/sda -> /dev/sda1, /dev/nvme0n1 -> /dev/nvme0n1p1
 part_name() {
     if [[ $1 =~ [0-9]$ ]]; then echo "${1}p$2"; else echo "${1}$2"; fi
 }
 
-pkg_available() { pacman -Si "$1" &> /dev/null; }
-
-# Run a command inside the new system
 in_chroot() { artix-chroot "$MNT" "$@"; }
 
-# pacman inside the new system (PACMAN_CHROOT_OPTS: e.g. --disable-sandbox
-# in containers, which can't run pacman's download sandbox)
+# PACMAN_CHROOT_OPTS: --disable-sandbox in containers
 # shellcheck disable=SC2086
 chroot_pacman() { in_chroot pacman $PACMAN_CHROOT_OPTS "$@"; }
 
-# Enable a dinit service in the new system. dinit isn't running in the
-# chroot, so create the boot.d link that `dinitctl enable` would create.
+# dinit doesn't run in the chroot, so create the link `dinitctl enable` would
 enable_service() {
     local svc=$1
     [[ -e $MNT/etc/dinit.d/$svc ]] || die "dinit service '$svc' not found in the new system"
@@ -134,8 +122,7 @@ enable_service() {
     ENABLED_SERVICES+=("$svc")
 }
 
-# Wait for partition device nodes. Without udev (for example in a
-# container) they are never created, so make them from sysfs.
+# Without udev (containers) partition nodes never appear; make them from sysfs
 wait_for_partitions() {
     local disk=$1 dev name i major minor
     partx -u "$disk" 2> /dev/null || blockdev --rereadpt "$disk" 2> /dev/null || true
@@ -153,9 +140,30 @@ wait_for_partitions() {
     done
 }
 
-# pacman-key and pacman start gpg-agent/dirmngr inside the chroot, and they
-# keep running and block unmounting /mnt. Stop them and anything else
-# whose root directory is the new system.
+# The stock list isn't sorted by distance and has dead mirrors. -w drops
+# the ones that don't answer within 5 s.
+rank_mirrors() {
+    local list=/etc/pacman.d/mirrorlist tmp count
+    if ! command -v rankmirrors > /dev/null; then
+        pacman -S --needed --noconfirm pacman-contrib > /dev/null \
+            || { warn "Couldn't install pacman-contrib; keeping the stock mirror order"; return 0; }
+    fi
+    [[ -e $list.stock ]] || cp "$list" "$list.stock"
+    info "Timing every mirror, this takes up to a minute..."
+    tmp=$(mktemp)
+    rankmirrors -w -n 0 -r system -m 5 "$list.stock" > "$tmp" 2> /dev/null || true
+    count=$(grep -c '^Server' "$tmp" || true)
+    if (( count == 0 )); then
+        warn "No mirror answered within 5 s; keeping the stock mirror order"
+        rm -f "$tmp"
+        return 0
+    fi
+    install -m 644 "$tmp" "$list"
+    rm -f "$tmp"
+    ok "$count of $(grep -c '^[[:space:]]*Server' "$list.stock") mirrors answered, fastest: $(awk '/^Server/ {sub(/^[a-z]+:\/\//, "", $3); sub(/\/.*/, "", $3); print $3; exit}' "$list")"
+}
+
+# gpg-agent/dirmngr started in the chroot keep running and block umount
 stop_chroot_processes() {
     local pid
     artix-chroot "$MNT" gpgconf --homedir /etc/pacman.d/gnupg --kill all &> /dev/null || true
@@ -186,9 +194,7 @@ usage() {
     exit 0
 }
 
-# ---------------------------------------------------------------------------
-# Arguments and logging
-# ---------------------------------------------------------------------------
+# --- Arguments and logging ---
 
 CONFIG_FILE=""
 while (( $# )); do
@@ -218,7 +224,6 @@ KEYMAP=${KEYMAP-}
 LOCALE=${LOCALE-}
 SWAP_SIZE=${SWAP_SIZE-}
 INSTALL_LTS=${INSTALL_LTS-}
-INSTALL_TIMESHIFT=${INSTALL_TIMESHIFT-}
 ENABLE_AUR=${ENABLE_AUR-}
 CONFIRM_WIPE=${CONFIRM_WIPE-}
 REBOOT_WHEN_DONE=${REBOOT_WHEN_DONE-}
@@ -235,8 +240,7 @@ ENABLED_SERVICES=()
 
 : > "$LOG"
 chmod 600 "$LOG"
-# Log everything except what is typed at the prompts (passwords are read
-# with read -s and never printed).
+# Passwords are read with read -s, so they never reach the log
 exec > >(tee -a "$LOG") 2>&1
 trap cleanup EXIT
 
@@ -249,9 +253,7 @@ ${C_BLU}
 ${C_RST}
 EOF
 
-# ---------------------------------------------------------------------------
-# 1. Pre-flight checks
-# ---------------------------------------------------------------------------
+# --- 1. Pre-flight checks ---
 
 step "Checking the live environment"
 
@@ -277,8 +279,6 @@ if ! curl -fsS --max-time 10 -o /dev/null https://artixlinux.org; then
 fi
 ok "Internet connection works"
 
-# CPU vendor decides the microcode and GPU drivers (the T14s Gen 2 exists
-# with Intel and AMD CPUs).
 if [[ -n $CPU_VENDOR ]]; then
     :   # preset (tests)
 elif grep -qm1 'GenuineIntel' /proc/cpuinfo; then
@@ -290,9 +290,7 @@ else
 fi
 ok "CPU vendor: $CPU_VENDOR"
 
-# ---------------------------------------------------------------------------
-# 2. Questions
-# ---------------------------------------------------------------------------
+# --- 2. Questions ---
 
 step "Target disk"
 mapfile -t DISKS < <(lsblk -dpno NAME,TYPE,RO | awk '$2 == "disk" && $3 == 0 {print $1}')
@@ -322,8 +320,7 @@ while :; do
     warn "Keymap '$KEYMAP' not found (list them with: localectl list-keymaps or ls /usr/share/kbd/keymaps/i386/*)"
     KEYMAP=""
 done
-# Load it now, so the passwords below are typed with the same layout as at
-# the boot prompt.
+# Same layout for the passwords below as at the boot prompt
 if loadkeys "$KEYMAP" 2> /dev/null; then
     ok "Loaded keymap $KEYMAP for the rest of the installation"
     KEYMAP_LOADED=yes
@@ -392,13 +389,6 @@ info "use when an update of the normal kernel doesn't boot."
 ask_yes_no INSTALL_LTS "Install the linux-lts fallback kernel?" y
 
 info ""
-info "Timeshift takes rsync snapshots of the system (not your home folder),"
-info "daily/weekly and before every pacman transaction, so you can roll back a"
-info "broken update with: sudo timeshift --restore. It works without systemd"
-info "(it uses cron). It pulls in some GTK libraries for its optional GUI."
-ask_yes_no INSTALL_TIMESHIFT "Install Timeshift system snapshots?" y
-
-info ""
 printf '%s' "$C_YLW"
 cat << EOF
     The AUR (Arch User Repository):
@@ -410,9 +400,7 @@ EOF
 printf '%s' "$C_RST"
 ask_yes_no ENABLE_AUR "Enable the AUR (installs the yay AUR helper)?" n
 
-# ---------------------------------------------------------------------------
-# 3. Confirmation
-# ---------------------------------------------------------------------------
+# --- 3. Confirmation ---
 
 step "Overview"
 cat << EOF
@@ -427,7 +415,6 @@ cat << EOF
     Time zone       : $TIMEZONE
     Swap file       : $([[ $SWAP_SIZE == 0 ]] && echo none || echo "$SWAP_SIZE GiB")
     LTS kernel      : $INSTALL_LTS
-    Timeshift       : $INSTALL_TIMESHIFT
     AUR (yay)       : $ENABLE_AUR
     Firewall        : ufw (deny incoming, allow outgoing)
 EOF
@@ -438,13 +425,10 @@ if [[ $CONFIRM_WIPE != yes ]]; then
     [[ $answer == ERASE ]] || die "Aborted, nothing was changed."
 fi
 
-# ---------------------------------------------------------------------------
-# 4. Clock and keyring on the live system
-# ---------------------------------------------------------------------------
+# --- 4. Clock and keyring on the live system ---
 
 step "Checking the clock"
-# A wrong clock makes PGP signatures look invalid. Compare with the Date
-# header of a web server and fix the clock when it is off.
+# A wrong clock breaks PGP signatures and TLS
 if web_date=$(curl -fsSI --max-time 10 https://artixlinux.org | awk -F': ' 'tolower($1) == "date" {print $2}' | tr -d '\r') \
         && [[ -n $web_date ]]; then
     web_epoch=$(date -d "$web_date" +%s)
@@ -465,12 +449,13 @@ pacman-key --populate artix
 pacman -Sy --needed --noconfirm artix-keyring
 ok "Keyring ready"
 
-# ---------------------------------------------------------------------------
-# 5. Partitioning and encryption
-# ---------------------------------------------------------------------------
+step "Ranking the package mirrors"
+rank_mirrors
+
+# --- 5. Partitioning and encryption ---
 
 step "Partitioning $DISK"
-# Clean up after an earlier, failed run of this script
+# Leftovers from an earlier, failed run
 if mountpoint -q "$MNT"; then
     swapoff "$MNT/swapfile" 2> /dev/null || true
     umount -R "$MNT"
@@ -514,9 +499,7 @@ if (( SWAP_SIZE > 0 )); then
     ok "Swap file created"
 fi
 
-# ---------------------------------------------------------------------------
-# 6. Base system
-# ---------------------------------------------------------------------------
+# --- 6. Base system ---
 
 step "Installing the base system (this takes a while)"
 PACKAGES=(
@@ -527,24 +510,26 @@ PACKAGES=(
     chrony chrony-dinit
     ufw ufw-dinit
     sudo git vim man-db bash-completion
-    mesa
 )
+# No GPU userspace (mesa etc.): that's up to the desktop installer
 case $CPU_VENDOR in
-    intel) PACKAGES+=(intel-ucode vulkan-intel intel-media-driver) ;;
-    amd)   PACKAGES+=(amd-ucode vulkan-radeon)
-           if pkg_available libva-mesa-driver; then PACKAGES+=(libva-mesa-driver); fi ;;
+    intel) PACKAGES+=(intel-ucode) ;;
+    amd)   PACKAGES+=(amd-ucode) ;;
     *)     PACKAGES+=(intel-ucode amd-ucode) ;;
 esac
 [[ $INSTALL_LTS == yes ]] && PACKAGES+=(linux-lts linux-lts-headers)
-[[ $INSTALL_TIMESHIFT == yes ]] && PACKAGES+=(timeshift cronie cronie-dinit rsync)
 
-# -K: give the new system its own, freshly initialised keyring
+# -K: separate keyring for the new system
 basestrap -K "$MNT" "${PACKAGES[@]}"
+# Make sure the new system gets the ranked list, not the package's stock one
+cp /etc/pacman.d/mirrorlist "$MNT/etc/pacman.d/mirrorlist"
+if [[ -e /etc/pacman.d/mirrorlist.stock ]]; then
+    cp /etc/pacman.d/mirrorlist.stock "$MNT/etc/pacman.d/mirrorlist.stock"
+fi
 ok "Base system installed"
 
 step "Generating /etc/fstab"
-# Written by hand instead of with fstabgen: fstabgen also copies swap that
-# is active on the live system (zram etc.), which doesn't exist after boot.
+# Not fstabgen: it would also add the live system's zram swap
 EFI_UUID=$(blkid -s UUID -o value "$PART_EFI")
 [[ -n $ROOT_FS_UUID && -n $EFI_UUID ]] || die "Couldn't read the file system UUIDs"
 {
@@ -559,9 +544,7 @@ EFI_UUID=$(blkid -s UUID -o value "$PART_EFI")
 } >> "$MNT/etc/fstab"
 ok "fstab written"
 
-# ---------------------------------------------------------------------------
-# 7. System configuration
-# ---------------------------------------------------------------------------
+# --- 7. System configuration ---
 
 step "Configuring the keyring in the new system"
 in_chroot pacman-key --init
@@ -591,8 +574,7 @@ EOF
 ok "$TIMEZONE, $LOCALE, $KEYMAP, $HOST_NAME"
 
 step "Initramfs with the encrypt hook"
-# keyboard + keymap before encrypt: the passphrase prompt needs a keyboard
-# and the configured layout. encrypt before filesystems: unlock, then mount.
+# keyboard and keymap before encrypt, for the passphrase prompt
 hooks="base udev autodetect microcode modconf kms keyboard keymap consolefont block encrypt filesystems fsck"
 for h in $hooks; do
     [[ -e $MNT/usr/lib/initcpio/install/$h ]] || hooks=${hooks/ $h / }
@@ -611,10 +593,9 @@ if grep -q '^GRUB_CMDLINE_LINUX=' "$MNT/etc/default/grub"; then
 else
     echo "GRUB_CMDLINE_LINUX=\"$cmdline\"" >> "$MNT/etc/default/grub"
 fi
-# Remember the last chosen entry, handy when you boot the LTS kernel
 sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/; s/^#\?GRUB_SAVEDEFAULT=.*/GRUB_SAVEDEFAULT=true/' "$MNT/etc/default/grub"
 grep -q '^GRUB_SAVEDEFAULT=' "$MNT/etc/default/grub" || echo 'GRUB_SAVEDEFAULT=true' >> "$MNT/etc/default/grub"
-# Without this grub-mkconfig sorts linux-lts first and boots it by default
+# Otherwise grub-mkconfig puts linux-lts first
 sed -i '/^#\?GRUB_TOP_LEVEL=/d' "$MNT/etc/default/grub"
 echo 'GRUB_TOP_LEVEL="/boot/vmlinuz-linux"' >> "$MNT/etc/default/grub"
 
@@ -623,9 +604,7 @@ if [[ $BOOT_MODE == UEFI ]]; then
 else
     in_chroot grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=artix --no-nvram
 fi
-# Also install to the fallback path \EFI\BOOT\BOOTX64.EFI. Firmware that
-# forgets or ignores its boot entries (some ThinkPads after a BIOS update,
-# VirtualBox) still finds GRUB there.
+# Fallback path \EFI\BOOT\BOOTX64.EFI, for firmware that loses its boot entries
 in_chroot grub-install --target=x86_64-efi --efi-directory=/boot --removable
 in_chroot grub-mkconfig -o /boot/grub/grub.cfg
 grep -q "cryptdevice=UUID=$LUKS_UUID" "$MNT/boot/grub/grub.cfg" || die "grub.cfg doesn't contain the cryptdevice option"
@@ -652,9 +631,6 @@ step "Services"
 enable_service NetworkManager
 if [[ -e $MNT/etc/dinit.d/chronyd ]]; then enable_service chronyd; else enable_service chrony; fi
 
-# Firewall: deny everything incoming except replies to our own traffic,
-# allow everything outgoing. ufw's defaults in /etc/default/ufw already do
-# that; the dinit service runs `ufw enable` at boot.
 sed -i 's/^ENABLED=.*/ENABLED=yes/' "$MNT/etc/ufw/ufw.conf"
 sed -i 's/^DEFAULT_INPUT_POLICY=.*/DEFAULT_INPUT_POLICY="DROP"/;
         s/^DEFAULT_OUTPUT_POLICY=.*/DEFAULT_OUTPUT_POLICY="ACCEPT"/;
@@ -662,17 +638,14 @@ sed -i 's/^DEFAULT_INPUT_POLICY=.*/DEFAULT_INPUT_POLICY="DROP"/;
 enable_service ufw
 ok "Enabled: ${ENABLED_SERVICES[*]}"
 
-# ---------------------------------------------------------------------------
-# 8. Optional: AUR helper
-# ---------------------------------------------------------------------------
+# --- 8. Optional: AUR helper ---
 
 if [[ $ENABLE_AUR == yes ]]; then
     step "Installing yay (AUR helper)"
     had_go=no
     in_chroot pacman -Q go &> /dev/null && had_go=yes
     chroot_pacman -S --needed --noconfirm git base-devel go
-    # Build in the user's home: artix-chroot gives /tmp a fresh tmpfs, so a
-    # package built there would be gone after the chroot command.
+    # Not in /tmp: artix-chroot mounts a fresh tmpfs there for every command
     build_dir=/home/$USER_NAME/.cache/yay-build
     in_chroot su - "$USER_NAME" -c "
         set -e
@@ -685,98 +658,11 @@ if [[ $ENABLE_AUR == yes ]]; then
     [[ -n $yay_pkg ]] || die "Building yay failed"
     chroot_pacman -U --noconfirm "${yay_pkg#"$MNT"}"
     rm -rf "${MNT:?}$build_dir"
-    # go is only needed to build yay
     if [[ $had_go == no ]]; then chroot_pacman -Rns --noconfirm go; fi
     ok "yay $(in_chroot pacman -Q yay | awk '{print $2}') installed"
 fi
 
-# ---------------------------------------------------------------------------
-# 9. Optional: Timeshift
-# ---------------------------------------------------------------------------
-
-if [[ $INSTALL_TIMESHIFT == yes ]]; then
-    step "Configuring Timeshift"
-    enable_service cronie
-    mkdir -p "$MNT/etc/timeshift"
-    cat > "$MNT/etc/timeshift/timeshift.json" << EOF
-{
-  "backup_device_uuid" : "$ROOT_FS_UUID",
-  "parent_device_uuid" : "$LUKS_UUID",
-  "do_first_run" : "false",
-  "btrfs_mode" : "false",
-  "include_btrfs_home_for_backup" : "false",
-  "include_btrfs_home_for_restore" : "false",
-  "stop_cron_emails" : "true",
-  "schedule_monthly" : "false",
-  "schedule_weekly" : "true",
-  "schedule_daily" : "true",
-  "schedule_hourly" : "false",
-  "schedule_boot" : "false",
-  "count_monthly" : "2",
-  "count_weekly" : "3",
-  "count_daily" : "5",
-  "count_hourly" : "6",
-  "count_boot" : "5",
-  "date_format" : "%Y-%m-%d %H:%M:%S",
-  "exclude" : [
-    "/swapfile",
-    "/var/cache/pacman/pkg/**"
-  ],
-  "exclude-apps" : []
-}
-EOF
-    # The scheduler: timeshift --check creates due snapshots and removes old ones
-    cat > "$MNT/etc/cron.d/timeshift-hourly" << 'EOF'
-SHELL=/bin/bash
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-MAILTO=""
-0 * * * * root timeshift --check --scripted > /dev/null 2>&1
-EOF
-
-    # Snapshot before every pacman transaction (at most one per hour). It's
-    # tagged as a daily snapshot, so the daily rotation (5) cleans them up.
-    cat > "$MNT/usr/local/bin/timeshift-pre-pacman" << 'EOF'
-#!/bin/sh
-# Called by /etc/pacman.d/hooks/00-timeshift-pre.hook (artix-install.sh).
-# Never blocks pacman: it always exits 0. Skip once with SKIP_SNAPSHOT=1.
-[ -n "$SKIP_SNAPSHOT" ] && exit 0
-# Only on the booted system, not in a chroot (e.g. repairing from the ISO)
-[ "$(cat /proc/1/comm 2>/dev/null)" = dinit ] || exit 0
-stamp=/var/lib/timeshift-pre-pacman.stamp
-if [ -f "$stamp" ] && [ $(( $(date +%s) - $(stat -c %Y "$stamp") )) -lt 3600 ]; then
-    echo "Timeshift: last pre-pacman snapshot is less than an hour old, skipping"
-    exit 0
-fi
-if timeshift --create --scripted --tags D --comments "before pacman $(date '+%F %R')" > /var/log/timeshift-pre-pacman.log 2>&1; then
-    touch "$stamp"
-    echo "Timeshift: snapshot created"
-else
-    echo "Timeshift: snapshot FAILED, see /var/log/timeshift-pre-pacman.log"
-fi
-exit 0
-EOF
-    chmod 755 "$MNT/usr/local/bin/timeshift-pre-pacman"
-    mkdir -p "$MNT/etc/pacman.d/hooks"
-    cat > "$MNT/etc/pacman.d/hooks/00-timeshift-pre.hook" << 'EOF'
-[Trigger]
-Operation = Upgrade
-Operation = Install
-Operation = Remove
-Type = Package
-Target = *
-
-[Action]
-Description = Creating a Timeshift snapshot before the transaction...
-When = PreTransaction
-Exec = /usr/local/bin/timeshift-pre-pacman
-Depends = timeshift
-EOF
-    ok "Timeshift: daily (5) and weekly (3) snapshots, plus one before pacman transactions"
-fi
-
-# ---------------------------------------------------------------------------
-# 10. Summary
-# ---------------------------------------------------------------------------
+# --- 9. Summary ---
 
 step "Finishing"
 kernel_pkgs=(linux)
@@ -791,7 +677,7 @@ SUMMARY=$(cat << EOF
 ================================================================================
  Hardware
    Boot mode        : $BOOT_MODE
-   CPU vendor       : $CPU_VENDOR (microcode + GPU drivers chosen for it)
+   CPU vendor       : $CPU_VENDOR (microcode chosen for it)
 
  Disk ($DISK, $(numfmt --to=iec "$DISK_SIZE"))
    $PART_EFI : EFI system partition, FAT32, mounted at /boot (NOT encrypted)
@@ -807,6 +693,7 @@ SUMMARY=$(cat << EOF
    Locale           : $LOCALE
    Console keymap   : $KEYMAP (also used at the passphrase prompt)
    Time zone        : $TIMEZONE
+   Fallback kernel  : $([[ $INSTALL_LTS == yes ]] && echo "linux-lts (GRUB > Advanced options for Artix Linux)" || echo "none")
 
  Accounts
    User             : $USER_NAME (groups: $(in_chroot id -nG "$USER_NAME"))
@@ -819,14 +706,10 @@ SUMMARY=$(cat << EOF
                       Status: sudo ufw status verbose   Allow ssh: sudo ufw allow ssh
                       GUI (after you install a desktop): sudo pacman -S gufw
    Keyring          : initialised and populated (artix-keyring)
+   Mirrors          : ranked at install time, stock list in /etc/pacman.d/mirrorlist.stock
 
  Services (dinit, /etc/dinit.d/boot.d)
    ${ENABLED_SERVICES[*]}
-
- Snapshots / rollback
-   Timeshift        : $([[ $INSTALL_TIMESHIFT == yes ]] && echo "yes - daily(5), weekly(3) and before pacman transactions
-                      List: sudo timeshift --list   Restore: sudo timeshift --restore" || echo "not installed")
-   Fallback kernel  : $([[ $INSTALL_LTS == yes ]] && echo "linux-lts (GRUB > Advanced options for Artix Linux)" || echo "none")
 
  AUR
    yay              : $([[ $ENABLE_AUR == yes ]] && echo "installed - AUR packages are unofficial, review PKGBUILDs ($AUR_WIKI)" || echo "not enabled")
@@ -846,7 +729,6 @@ echo "$SUMMARY" > "$SUMMARY_DIR/summary.txt"
 chmod 644 "$SUMMARY_DIR/summary.txt"
 printf '\n%s\n' "$SUMMARY"
 
-# Copy the log last (it contains no passwords)
 cp "$LOG" "$SUMMARY_DIR/install.log"
 chmod 600 "$SUMMARY_DIR/install.log"
 

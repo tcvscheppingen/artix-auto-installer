@@ -8,14 +8,14 @@ The installation script is designed to work on a UEFI Lenovo ThinkPad, but will 
 
 The script will do the following:
 - Install Artix Linux with Dinit as the init system and with an encrypted root partition.
+- Rank the package mirrors by speed (`rankmirrors`), for the installation and the installed system.
 - Optionally:
-  - Enable TimeShift for rollbacks in case the system breaks.
   - Install the LTS Linux kernel as fallback
   - Enable a firewall (UFW) to improve security.
   - Enable the Arch User Repository (AUR) and install `yay` as AUR helper.
  
 The script will **not** do the following:
-- Install a desktop environment or window manager.  
+- Install a desktop environment or window manager, or GPU userspace drivers (mesa, Vulkan, VA-API).  
   You can use my other [installation script](https://github.com/tcvscheppingen/DARBS) to install my config of DWM and some other tools.
 
 ## Usage

@@ -1,7 +1,6 @@
 #!/usr/bin/expect -f
-# Boots the installed disk like a ThinkPad: UEFI (OVMF, empty NVRAM, so the
-# fallback \EFI\BOOT\BOOTX64.EFI is used), q35, NVMe, Intel e1000e NIC.
-# The emulated (TCG) CPU makes everything slow; timeouts are generous.
+# Boots the installed disk like a ThinkPad: UEFI with empty NVRAM (so the
+# fallback BOOTX64.EFI is used), q35, NVMe, e1000e. TCG is slow, hence the timeouts.
 set timeout 900
 log_file -noappend /logs/boot.log
 
@@ -37,7 +36,6 @@ expect {
 }
 puts "\n>>> TEST: login prompt reached"
 
-# Checks done here, as the installed user, are counted with these.
 set passed 0
 set failed 0
 proc check {ok name} {
@@ -45,9 +43,8 @@ proc check {ok name} {
     if {$ok} { puts "\nPASS  $name"; incr passed } else { puts "\nFAIL  $name"; incr failed }
 }
 
-# --- Can the installed user log in? -------------------------------------
-# Through the real getty + login (PAM) path. A wrong password first, so a
-# successful login proves the password is checked, not just accepted.
+# --- Login, through getty + PAM ---
+# A wrong password first, so a successful login proves it is checked
 sleep 5
 send -- "$user\r"
 expect "Password:"
@@ -69,7 +66,6 @@ expect {
 # A plain prompt is easier to match than Artix's colored one
 send -- "PS1='READY> '\r"
 expect "READY> "
-# The echoed command contains $(...), the output contains the values
 send -- {echo "SESSION user=$(id -un) home=$HOME pwd=$(pwd) shell=$SHELL"}
 send -- "\r"
 expect {
@@ -81,8 +77,7 @@ expect {
 }
 expect "READY> "
 
-# --- Can the installed user use sudo? -----------------------------------
-# sudo -k forgets cached credentials, so sudo has to ask for the password.
+# --- sudo (-k: always ask for the password) ---
 send -- "sudo -k; sudo id -u\r"
 expect "password for $user"
 send -- "wrong password\r"
@@ -104,7 +99,7 @@ expect {
 }
 expect "READY> "
 
-# --- System checks (as root, via sudo) ----------------------------------
+# --- System checks as root ---
 send -- "sudo -k; sudo /usr/local/bin/boot-checks.sh\r"
 expect "password for $user"
 send -- "$pass\r"

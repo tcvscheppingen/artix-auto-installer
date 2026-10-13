@@ -2,23 +2,22 @@
 # Runs inside the artix-live-sim container: runs the installer on a loop device.
 set -Eeuo pipefail
 
-# The live ISO's /dev is a devtmpfs managed by udev; Docker gives a tmpfs.
-# Use the kernel's devtmpfs so device nodes (partitions, /dev/mapper/...)
-# exist, also inside artix-chroot (which mounts devtmpfs itself).
+# Docker's /dev is a tmpfs; the kernel's devtmpfs gets partition and
+# /dev/mapper nodes, like the live ISO
 mount -t devtmpfs devtmpfs /dev
 mkdir -p /dev/pts /dev/shm
 mount -t devpts devpts /dev/pts
 mount -t tmpfs tmpfs /dev/shm
 
-# Device mappings and loop devices belong to the Docker VM's kernel, so
-# remove leftovers from an earlier, aborted test run.
+# Loop devices and mappings live in the Docker VM's kernel and survive
+# an aborted run
 umount -R /mnt 2> /dev/null || true
 dmsetup remove_all 2> /dev/null || true
 losetup -D
 
 IMG=/out/disk.img
 rm -f "$IMG"
-truncate -s 24G "$IMG"            # sparse; similar to a small NVMe drive
+truncate -s 24G "$IMG"
 LOOP=$(losetup -fP --show "$IMG")
 trap 'losetup -d "$LOOP"' EXIT
 echo "Test disk: $LOOP"

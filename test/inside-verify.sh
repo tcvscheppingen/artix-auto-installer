@@ -70,20 +70,20 @@ check "root is locked"                         sh -c "grep '^root:' $M/etc/shado
 check "sudoers wheel rule + valid syntax"      sh -c "grep -q '^%wheel ALL=(ALL:ALL) ALL' $M/etc/sudoers.d/10-wheel && chroot $M visudo -cq"
 check "keyring initialised in target"          test -s $M/etc/pacman.d/gnupg/pubring.gpg
 check "artix keys populated"                   sh -c "chroot $M pacman-key --list-keys 2>/dev/null | grep -qi artix"
+check "mirrorlist has active servers"          grep -q '^Server' $M/etc/pacman.d/mirrorlist
+check "mirrorlist is ranked, stock list kept"  sh -c "grep -q rankmirrors $M/etc/pacman.d/mirrorlist && test -s $M/etc/pacman.d/mirrorlist.stock"
 
 echo "== Services and packages"
-for s in NetworkManager ufw cronie; do
+for s in NetworkManager ufw; do
     check "service $s enabled"                 test -L $M/etc/dinit.d/boot.d/$s
 done
 check "time sync service enabled"              sh -c "ls $M/etc/dinit.d/boot.d/ | grep -q chrony"
 check "ufw ENABLED=yes"                        grep -q '^ENABLED=yes' $M/etc/ufw/ufw.conf
 check "ufw default deny incoming"              grep -q '^DEFAULT_INPUT_POLICY="DROP"' $M/etc/default/ufw
-check "timeshift config"                       grep -q "$(blkid -s UUID -o value /dev/mapper/vroot)" $M/etc/timeshift/timeshift.json
-check "timeshift cron"                         test -f $M/etc/cron.d/timeshift-hourly
-check "timeshift pacman hook"                  test -f $M/etc/pacman.d/hooks/00-timeshift-pre.hook
 check "yay installed"                          chroot $M pacman -Q yay
 check "go removed after yay build"             sh -c "! chroot $M pacman -Q go"
 check "no systemd installed"                   sh -c "! chroot $M pacman -Q systemd"
+check "no GPU userspace or GTK installed"      sh -c "! chroot $M pacman -Q mesa gtk3 2> /dev/null | grep -q ."
 check "install summary written"                test -s $M/var/log/artix-install/summary.txt
 check "install log has no LUKS passphrase"     sh -c "! grep -qF '$LUKS_PASSWORD' $M/var/log/artix-install/install.log"
 check "install log has no user password"       sh -c "! grep -qF '$USER_PASSWORD' $M/var/log/artix-install/install.log"

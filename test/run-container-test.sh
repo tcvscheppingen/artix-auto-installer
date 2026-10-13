@@ -6,11 +6,11 @@
 #   1. shellcheck
 #   2. install: a privileged Artix container (the "live ISO") runs the real
 #      installer against a 24 GiB loop device - partitioning, LUKS2,
-#      basestrap, chroot setup, GRUB, users, firewall, Timeshift, yay
+#      basestrap, chroot setup, GRUB, users, firewall, yay
 #   3. verify: opens the encrypted disk again and checks the result
 #   4. boot: QEMU (UEFI/OVMF, q35, NVMe, e1000e) boots the disk image,
 #      types the LUKS passphrase over the serial console, logs in and runs
-#      checks in the booted system (services, firewall, sudo, Timeshift...)
+#      checks in the booted system (services, firewall, sudo...)
 #
 # Usage: ./run-container-test.sh [shellcheck|install|verify|boot|all]
 
