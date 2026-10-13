@@ -36,25 +36,82 @@ expect {
     timeout { fail "no login prompt after unlock" }
 }
 puts "\n>>> TEST: login prompt reached"
+
+# Checks done here, as the installed user, are counted with these.
+set passed 0
+set failed 0
+proc check {ok name} {
+    global passed failed
+    if {$ok} { puts "\nPASS  $name"; incr passed } else { puts "\nFAIL  $name"; incr failed }
+}
+
+# --- Can the installed user log in? -------------------------------------
+# Through the real getty + login (PAM) path. A wrong password first, so a
+# successful login proves the password is checked, not just accepted.
 sleep 5
+send -- "$user\r"
+expect "Password:"
+send -- "wrong password\r"
+expect {
+    "Login incorrect" { check 1 "login: wrong password is rejected" }
+    -re {\]\$}        { check 0 "login: wrong password is rejected"; fail "logged in with a wrong password" }
+    timeout           { check 0 "login: wrong password is rejected" }
+}
+expect "login:"
 send -- "$user\r"
 expect "Password:"
 send -- "$pass\r"
 expect {
-    -re {\]\$} {}
-    "Login incorrect" { fail "login failed" }
-    timeout { fail "no shell prompt" }
+    -re {\]\$}        { check 1 "login: $user logs in with the right password" }
+    "Login incorrect" { check 0 "login: $user logs in with the right password"; fail "login failed" }
+    timeout           { check 0 "login: $user logs in with the right password"; fail "no shell prompt" }
 }
-puts "\n>>> TEST: logged in"
 # A plain prompt is easier to match than Artix's colored one
 send -- "PS1='READY> '\r"
 expect "READY> "
-send -- "sudo /usr/local/bin/boot-checks.sh\r"
+# The echoed command contains $(...), the output contains the values
+send -- {echo "SESSION user=$(id -un) home=$HOME pwd=$(pwd) shell=$SHELL"}
+send -- "\r"
+expect {
+    -re "SESSION user=$user home=/home/$user pwd=/home/$user shell=/bin/bash" {
+        check 1 "login: session is $user, home /home/$user, shell bash"
+    }
+    -re {SESSION user=[a-z][^\r\n]*[\r\n]} { check 0 "login: session is $user, home /home/$user, shell bash" }
+    timeout                   { check 0 "login: session is $user, home /home/$user, shell bash" }
+}
+expect "READY> "
+
+# --- Can the installed user use sudo? -----------------------------------
+# sudo -k forgets cached credentials, so sudo has to ask for the password.
+send -- "sudo -k; sudo id -u\r"
+expect "password for $user"
+send -- "wrong password\r"
+expect {
+    "Sorry, try again" { check 1 "sudo: wrong password is rejected" }
+    timeout            { check 0 "sudo: wrong password is rejected" }
+}
+send -- "\x03"
+expect "READY> "
+send -- {sudo -k; sudo sh -c 'echo "SUDO uid=$(id -u) user=$(id -un) by=$SUDO_USER"'}
+send -- "\r"
+expect "password for $user"
+send -- "$pass\r"
+expect {
+    -re "SUDO uid=0 user=root by=$user" { check 1 "sudo: $user runs commands as root with own password" }
+    -re {SUDO uid=[0-9][^\r\n]*[\r\n]}                 { check 0 "sudo: $user runs commands as root with own password" }
+    "is not in the sudoers file"        { check 0 "sudo: $user runs commands as root with own password" }
+    timeout                             { check 0 "sudo: $user runs commands as root with own password" }
+}
+expect "READY> "
+
+# --- System checks (as root, via sudo) ----------------------------------
+send -- "sudo -k; sudo /usr/local/bin/boot-checks.sh\r"
 expect "password for $user"
 send -- "$pass\r"
 expect {
     -re {BOOT CHECKS: (\d+) passed, (\d+) failed} {
-        set failed $expect_out(2,string)
+        incr passed $expect_out(1,string)
+        incr failed $expect_out(2,string)
     }
     timeout { fail "boot checks did not finish" }
 }
@@ -65,5 +122,6 @@ expect {
     eof {}
     timeout {}
 }
-if {$failed != 0} { puts "\nBOOT TEST: $failed check(s) failed"; exit 1 }
-puts "\nBOOT TEST PASSED"
+puts "\n== BOOT TEST TOTAL: $passed passed, $failed failed"
+if {$failed != 0} { puts "BOOT TEST: $failed check(s) failed"; exit 1 }
+puts "BOOT TEST PASSED"

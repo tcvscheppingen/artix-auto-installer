@@ -22,7 +22,7 @@ check "network: DHCP address"           sh -c "for i in \$(seq 30); do ip -4 add
 check "network: DNS + HTTPS"            sh -c "curl -fsS --max-time 20 -o /dev/null https://artixlinux.org"
 check "keymap loaded from vconsole"     grep -qx 'KEYMAP=us-acentos' /etc/vconsole.conf
 check "user is in wheel"                sh -c "id -nG tester | grep -qw wheel"
-check "sudo works for tester"           sh -c "sudo -l -U tester | grep -q '(ALL : ALL) ALL'"
+check "sudoers grants tester (ALL : ALL)" sh -c "sudo -l -U tester | grep -q '(ALL : ALL) ALL'"
 check "root password locked"            sh -c "passwd -S root | awk '{print \$2}' | grep -qx L"
 check "yay runs"                        sh -c "yay --version"
 check "timeshift: manual snapshot"      timeshift --create --scripted --comments boot-test
