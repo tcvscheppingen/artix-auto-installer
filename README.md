@@ -18,6 +18,21 @@ The script will **not** do the following:
 - Install a desktop environment or window manager.  
   You can use my other [installation script](https://github.com/tcvscheppingen/DARBS) to install my config of DWM and some other tools.
 
-### Disclaimer
+## Usage
+
+Boot the Artix **base dinit** ISO in UEFI mode with Secure Boot off, log in as `root` (password `artix`), connect to the internet, then:
+
+```bash
+pacman -Sy git
+git clone https://github.com/tcvscheppingen/artix-auto-installer.git
+cd artix-auto-installer
+./artix-install.sh
+```
+To preset some or all answers, copy `install.conf.example`, fill it in and run `./artix-install.sh --config install.conf`. Anything you leave empty is asked for.
+
+If you want to test the installation script you can do so by running `test/run-container-test.sh`
+
+## Disclaimer
 I wrote this script with assistance from a Large Language Model.   
 I have reviewed the script in its entirety and validated it by running it in a VM.
+
