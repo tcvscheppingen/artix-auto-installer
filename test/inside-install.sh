@@ -9,11 +9,12 @@ mkdir -p /dev/pts /dev/shm
 mount -t devpts devpts /dev/pts
 mount -t tmpfs tmpfs /dev/shm
 
-# Loop devices and mappings live in the Docker VM's kernel and survive
-# an aborted run
+# Loop devices and mappings outlive an aborted run. Only the test's own: on
+# a Linux host, the others are the host's.
+# shellcheck source-path=SCRIPTDIR source=disk.sh
+source /src/test/disk.sh
 umount -R /mnt 2> /dev/null || true
-dmsetup remove_all 2> /dev/null || true
-losetup -D
+release_test_disk
 
 IMG=/out/disk.img
 rm -f "$IMG"

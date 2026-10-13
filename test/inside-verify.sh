@@ -4,24 +4,12 @@
 set -Eeuo pipefail
 # shellcheck source=/dev/null
 source /src/test/test.conf
-
-IMG=/out/disk.img
-LOOP=$(losetup -fP --show "$IMG")
-for n in 1 2; do
-    p=${LOOP}p$n
-    if [[ ! -b $p ]]; then
-        IFS=: read -r major minor < "/sys/class/block/$(basename "$p")/dev"
-        mknod "$p" b "$major" "$minor"
-    fi
-done
+# shellcheck source-path=SCRIPTDIR source=disk.sh
+source /src/test/disk.sh
 M=/mnt
-# shellcheck disable=SC2329  # used by trap
-cleanup() { umount -R "$M" 2> /dev/null; cryptsetup close vroot 2> /dev/null; losetup -d "$LOOP"; }
-trap cleanup EXIT
 
-printf '%s' "$LUKS_PASSWORD" | cryptsetup open --key-file=- "${LOOP}p2" vroot
-mount /dev/mapper/vroot $M
-mount "${LOOP}p1" $M/boot
+open_disk
+trap close_disk EXIT
 
 pass=0 fail=0
 check() {
@@ -36,7 +24,7 @@ lsblk -o NAME,SIZE,FSTYPE,LABEL "$LOOP"
 check "GPT with ESP (type EF00) as partition 1" sh -c "sfdisk -d $LOOP | grep -q 'p1.*C12A7328-F81F-11D2-BA4B-00A0C93EC93B'"
 check "partition 2 is LUKS2"                   sh -c "cryptsetup luksDump ${LOOP}p2 | grep -q 'Version:.*2'"
 check "ESP is FAT32"                           sh -c "blkid -s TYPE -o value ${LOOP}p1 | grep -qx vfat"
-check "root is ext4"                           sh -c "blkid -s TYPE -o value /dev/mapper/vroot | grep -qx ext4"
+check "root is ext4"                           sh -c "blkid -s TYPE -o value /dev/mapper/$MAP | grep -qx ext4"
 
 echo "== Boot chain"
 LUUID=$(cryptsetup luksUUID "${LOOP}p2")
@@ -54,7 +42,7 @@ check "LTS initramfs exists"                   test -f $M/boot/initramfs-linux-l
 check "microcode present"                      sh -c "ls $M/boot/*-ucode.img"
 check "GRUB EFI binary (artix)"                test -f $M/boot/EFI/artix/grubx64.efi
 check "GRUB fallback BOOTX64.EFI"              test -f $M/boot/EFI/BOOT/BOOTX64.EFI
-check "grub.cfg has cryptdevice=UUID=$LUUID"   grep -q "cryptdevice=UUID=$LUUID:cryptroot root=/dev/mapper/cryptroot" $M/boot/grub/grub.cfg
+check "grub.cfg has cryptdevice=UUID=$LUUID"   grep -q "cryptdevice=UUID=$LUUID:$CRYPT_NAME root=/dev/mapper/$CRYPT_NAME" $M/boot/grub/grub.cfg
 check "first GRUB entry boots the main kernel" sh -c "grep -m1 -E '^\s*linux\s' $M/boot/grub/grub.cfg | grep -q 'vmlinuz-linux '"
 check "grub.cfg has linux-lts entry"           grep -q 'vmlinuz-linux-lts' $M/boot/grub/grub.cfg
 
@@ -83,8 +71,18 @@ check "ufw default deny incoming"              grep -q '^DEFAULT_INPUT_POLICY="D
 check "yay installed"                          chroot $M pacman -Q yay
 check "go removed after yay build"             sh -c "! chroot $M pacman -Q go"
 check "no systemd installed"                   sh -c "! chroot $M pacman -Q systemd"
-check "no GPU userspace or GTK installed"      sh -c "! chroot $M pacman -Q mesa gtk3 2> /dev/null | grep -q ."
-check "install summary written"                test -s $M/var/log/artix-install/summary.txt
+check "no GTK installed"                       sh -c "! chroot $M pacman -Q gtk3"
+check "mesa not installed explicitly"          sh -c "! chroot $M pacman -Qeq mesa"
+check "nvidia-open-dkms installed"             chroot $M pacman -Q nvidia-open-dkms nvidia-utils
+check "nvidia module built for linux"          sh -c "find $M/usr/lib/modules/*-artix*/ -name 'nvidia.ko*' | grep -q ."
+check "nvidia module built for linux-lts"      sh -c "find $M/usr/lib/modules/*-lts/ -name 'nvidia.ko*' | grep -q ."
+check "no kms hook (keeps nouveau out)"        sh -c "! grep -E '^HOOKS=.* kms ' $M/etc/mkinitcpio.conf"
+check "older HDA driver instead of SOF"        grep -qx 'options snd-intel-dspcfg dsp_driver=1' $M/etc/modprobe.d/legacy-hda.conf
+check "nouveau not in initramfs"               sh -c "! chroot $M lsinitcpio /boot/initramfs-linux.img | grep -q nouveau"
+check "summary saved in the user's home"       test -s "$M/home/$USER_NAME/artix-install-summary.md"
+check "summary belongs to the user"            sh -c "chroot $M stat -c %U /home/$USER_NAME/artix-install-summary.md | grep -qx $USER_NAME"
+check "summary explains the sound switch"      grep -q 'sound-fix sof' "$M/home/$USER_NAME/artix-install-summary.md"
+check "install log written"                    test -s $M/var/log/artix-install/install.log
 check "install log has no LUKS passphrase"     sh -c "! grep -qF '$LUKS_PASSWORD' $M/var/log/artix-install/install.log"
 check "install log has no user password"       sh -c "! grep -qF '$USER_PASSWORD' $M/var/log/artix-install/install.log"
 

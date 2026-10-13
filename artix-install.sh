@@ -6,11 +6,11 @@
 #   * UEFI only, GPT, 1 GiB unencrypted EFI partition mounted at /boot
 #   * LUKS2 encrypted root (ext4); the initramfs asks for the passphrase
 #   * GRUB, NetworkManager, chrony, ufw firewall (deny incoming)
-#   * optional: linux-lts fallback kernel, yay (AUR)
+#   * optional: linux-lts fallback kernel, NVIDIA driver, yay (AUR)
 #
-# Made for the ThinkPad T14s Gen 2 (Intel or AMD) and other recent
-# ThinkPads. Run it as root from the Artix base dinit live ISO. Afterwards,
-# install a desktop with https://github.com/tcvscheppingen/DARBS
+# For UEFI PCs and laptops with an Intel or AMD CPU. Run it as root from the
+# Artix base dinit live ISO. Afterwards, install a desktop with
+# https://github.com/tcvscheppingen/DARBS
 #
 # Usage:
 #   ./artix-install.sh                  # interactive
@@ -23,7 +23,6 @@ set -Eeuo pipefail
 
 readonly SCRIPT_VERSION="1.0.0"
 readonly MNT=/mnt
-readonly CRYPT_NAME=cryptroot
 readonly LOG=/tmp/artix-install.log
 readonly AUR_WIKI="https://wiki.archlinux.org/title/Arch_User_Repository"
 readonly DARBS_URL="https://github.com/tcvscheppingen/DARBS"
@@ -163,6 +162,62 @@ rank_mirrors() {
     ok "$count of $(grep -c '^[[:space:]]*Server' "$list.stock") mirrors answered, fastest: $(awk '/^Server/ {sub(/^[a-z]+:\/\//, "", $3); sub(/\/.*/, "", $3); print $3; exit}' "$list")"
 }
 
+# Sets NVIDIA_ID (PCI device ID of the first NVIDIA GPU), OTHER_GPU (an
+# Intel/AMD GPU next to it: hybrid laptop) and NVIDIA_PKGS. By generation:
+# Turing and newer (>= 0x1e00) use the open kernel modules, Maxwell to Volta
+# (>= 0x1340) the 580xx branch, and Kepler and older have no packaged driver.
+detect_gpus() {
+    local dev class vendor id
+    OTHER_GPU=no
+    NVIDIA_PKGS=()
+    for dev in /sys/bus/pci/devices/*; do
+        [[ -r $dev/class ]] || continue
+        read -r class < "$dev/class"
+        [[ $class == 0x03* ]] || continue
+        read -r vendor < "$dev/vendor"
+        read -r id < "$dev/device"
+        if [[ $vendor == 0x10de ]]; then
+            [[ -n $NVIDIA_ID ]] || NVIDIA_ID=$id
+        elif [[ $vendor == 0x8086 || $vendor == 0x1002 ]]; then
+            OTHER_GPU=yes
+        fi
+    done
+    [[ -n $NVIDIA_ID ]] || return 0
+    if (( NVIDIA_ID >= 0x1e00 )); then
+        NVIDIA_PKGS=(nvidia-open-dkms nvidia-utils)
+    elif (( NVIDIA_ID >= 0x1340 )); then
+        NVIDIA_PKGS=(nvidia-580xx-dkms nvidia-580xx-utils)
+    fi
+}
+
+# Intel audio with a DSP (PCI class 0x040100 or 0x040380; plain HDA is
+# 0x040300) can get the SOF driver; the kernel picks SOF when the laptop has
+# digital microphones. Sets INTEL_AUDIO_DSP, AUDIO_DRIVER (the driver the
+# live ISO uses) and SOF_FAILED: SOF's firmware is on the live ISO, but no
+# sound device with playback came up. Without the firmware on the ISO that
+# says nothing, and SOF can also fail later (only PipeWire shows a "Dummy
+# Output"), so this only catches the clear failures.
+detect_audio() {
+    local dev class vendor
+    AUDIO_DRIVER=""
+    SOF_FAILED=no
+    for dev in /sys/bus/pci/devices/*; do
+        [[ -r $dev/class ]] || continue
+        read -r class < "$dev/class"
+        read -r vendor < "$dev/vendor"
+        if [[ $vendor == 0x8086 && ( $class == 0x040100 || $class == 0x040380 ) ]]; then
+            INTEL_AUDIO_DSP=yes
+            if [[ -e $dev/driver ]]; then AUDIO_DRIVER=$(basename "$(readlink "$dev/driver")"); fi
+        fi
+    done
+    if [[ $INTEL_AUDIO_DSP == yes && $AUDIO_DRIVER != snd_hda_intel ]] \
+            && compgen -G "/usr/lib/firmware/intel/sof*" > /dev/null \
+            && ! grep -qs playback /proc/asound/pcm; then
+        SOF_FAILED=yes
+    fi
+    return 0
+}
+
 # gpg-agent/dirmngr started in the chroot keep running and block umount
 stop_chroot_processes() {
     local pid
@@ -224,7 +279,10 @@ KEYMAP=${KEYMAP-}
 LOCALE=${LOCALE-}
 SWAP_SIZE=${SWAP_SIZE-}
 INSTALL_LTS=${INSTALL_LTS-}
+INSTALL_NVIDIA=${INSTALL_NVIDIA-}
+AUDIO_LEGACY_HDA=${AUDIO_LEGACY_HDA-}
 ENABLE_AUR=${ENABLE_AUR-}
+SAVE_SUMMARY=${SAVE_SUMMARY-}
 CONFIRM_WIPE=${CONFIRM_WIPE-}
 REBOOT_WHEN_DONE=${REBOOT_WHEN_DONE-}
 # Advanced / testing
@@ -232,7 +290,13 @@ EXTRA_KERNEL_PARAMS=${EXTRA_KERNEL_PARAMS-}
 LUKS_FORMAT_OPTS=${LUKS_FORMAT_OPTS-}
 ALLOW_NO_UEFI=${ALLOW_NO_UEFI-no}
 CPU_VENDOR=${CPU_VENDOR-}
+NVIDIA_ID=${NVIDIA_ID-}
+INTEL_AUDIO_DSP=${INTEL_AUDIO_DSP-no}
 PACMAN_CHROOT_OPTS=${PACMAN_CHROOT_OPTS-}
+CRYPT_NAME=${CRYPT_NAME:-cryptroot}
+# yes: a container on someone's computer, so don't touch its EFI boot
+# entries, clock or console keymap
+TEST_IN_CONTAINER=${TEST_IN_CONTAINER-no}
 
 ENABLED_SERVICES=()
 
@@ -264,7 +328,7 @@ elif [[ $ALLOW_NO_UEFI == yes ]]; then
     BOOT_MODE="none (test mode)"
     warn "No UEFI firmware found; continuing because ALLOW_NO_UEFI=yes (testing only)"
 else
-    die "This system did not boot in UEFI mode. Reboot, and in the ThinkPad F12 boot menu pick the USB stick's UEFI entry. Make sure CSM/legacy boot is off in the firmware setup (F1)."
+    die "This system did not boot in UEFI mode. Reboot, pick the USB stick's UEFI entry in the firmware's boot menu, and make sure CSM/legacy boot is off in the firmware setup."
 fi
 
 grep -qs '^ID=artix' /etc/os-release || die "This doesn't look like an Artix system. Boot the Artix base dinit ISO."
@@ -274,9 +338,13 @@ for cmd in basestrap artix-chroot cryptsetup sfdisk mkfs.fat mkfs.ext4 pacman-ke
 done
 ok "Required tools are present"
 
-if ! curl -fsS --max-time 10 -o /dev/null https://artixlinux.org; then
-    die "No internet connection. Connect with a cable, or Wi-Fi via connmanctl (see the guide), then run this script again."
-fi
+# A few tries: right after connecting, DHCP and DNS may need a moment
+online=no
+for try in 1 2 3; do
+    if curl -fsS --max-time 10 -o /dev/null https://artixlinux.org; then online=yes; break; fi
+    (( try < 3 )) && sleep 5
+done
+[[ $online == yes ]] || die "No internet connection. Connect with a cable, or Wi-Fi via connmanctl (see the guide), then run this script again."
 ok "Internet connection works"
 
 if [[ -n $CPU_VENDOR ]]; then
@@ -289,6 +357,18 @@ else
     CPU_VENDOR=unknown
 fi
 ok "CPU vendor: $CPU_VENDOR"
+
+detect_gpus
+if [[ -n $NVIDIA_ID ]]; then
+    ok "NVIDIA GPU: device $NVIDIA_ID$([[ $OTHER_GPU == yes ]] && echo ", next to an Intel/AMD GPU")"
+fi
+detect_audio
+if [[ $INTEL_AUDIO_DSP == yes ]]; then
+    ok "Intel audio with DSP$([[ -n $AUDIO_DRIVER ]] && echo ", live ISO driver: $AUDIO_DRIVER")"
+    if [[ $SOF_FAILED == yes ]]; then
+        warn "SOF didn't start on the live system: no sound device came up, although its firmware is there"
+    fi
+fi
 
 # --- 2. Questions ---
 
@@ -321,7 +401,7 @@ while :; do
     KEYMAP=""
 done
 # Same layout for the passwords below as at the boot prompt
-if loadkeys "$KEYMAP" 2> /dev/null; then
+if [[ $TEST_IN_CONTAINER != yes ]] && loadkeys "$KEYMAP" 2> /dev/null; then
     ok "Loaded keymap $KEYMAP for the rest of the installation"
     KEYMAP_LOADED=yes
 else
@@ -344,7 +424,7 @@ done
 
 step "Host name and users"
 while :; do
-    ask HOST_NAME "Host name" "t14s"
+    ask HOST_NAME "Host name" "artix"
     [[ $HOST_NAME =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]] && break
     warn "Use letters, digits and hyphens only (max 63 characters)."
     HOST_NAME=""
@@ -388,6 +468,34 @@ info "The LTS kernel is a second boot entry (GRUB > Advanced options) you can"
 info "use when an update of the normal kernel doesn't boot."
 ask_yes_no INSTALL_LTS "Install the linux-lts fallback kernel?" y
 
+if (( ${#NVIDIA_PKGS[@]} > 0 )); then
+    info ""
+    info "Without NVIDIA's proprietary driver the open nouveau driver is used. It"
+    info "works, but is much slower and can't manage power on most cards."
+    ask_yes_no INSTALL_NVIDIA "Install NVIDIA's driver (${NVIDIA_PKGS[0]})?" y
+else
+    if [[ -n $NVIDIA_ID ]]; then
+        warn "NVIDIA GPU $NVIDIA_ID is Kepler or older; no packaged driver supports it, so nouveau is used"
+    fi
+    INSTALL_NVIDIA=no
+fi
+
+if [[ $INTEL_AUDIO_DSP == yes && $AUDIO_DRIVER != snd_hda_intel ]]; then
+    info ""
+    info "The Intel sound chip has a DSP, so Linux uses the SOF driver for it. On some"
+    info "laptops SOF only gives a 'Dummy Output'. The older HDA driver then works,"
+    info "but without the built-in digital microphones."
+    if [[ $SOF_FAILED == yes ]]; then
+        info "SOF didn't start on this live system, so the older driver is the default."
+        ask_yes_no AUDIO_LEGACY_HDA "Use the older HDA driver instead of SOF?" y
+    else
+        info "Not sure? Answer n; the summary shows how to switch later."
+        ask_yes_no AUDIO_LEGACY_HDA "Use the older HDA driver instead of SOF?" n
+    fi
+else
+    AUDIO_LEGACY_HDA=no
+fi
+
 info ""
 printf '%s' "$C_YLW"
 cat << EOF
@@ -415,6 +523,8 @@ cat << EOF
     Time zone       : $TIMEZONE
     Swap file       : $([[ $SWAP_SIZE == 0 ]] && echo none || echo "$SWAP_SIZE GiB")
     LTS kernel      : $INSTALL_LTS
+    NVIDIA driver   : $([[ $INSTALL_NVIDIA == yes ]] && echo "${NVIDIA_PKGS[*]}" || echo no)
+    Sound driver    : $([[ $AUDIO_LEGACY_HDA == yes ]] && echo "older HDA driver (no SOF)" || echo default)
     AUR (yay)       : $ENABLE_AUR
     Firewall        : ufw (deny incoming, allow outgoing)
 EOF
@@ -433,7 +543,9 @@ if web_date=$(curl -fsSI --max-time 10 https://artixlinux.org | awk -F': ' 'tolo
         && [[ -n $web_date ]]; then
     web_epoch=$(date -d "$web_date" +%s)
     skew=$(( $(date +%s) - web_epoch ))
-    if (( ${skew#-} > 120 )); then
+    if (( ${skew#-} > 120 )) && [[ $TEST_IN_CONTAINER == yes ]]; then
+        warn "Clock is off by ${skew}s; not changing it in a test container"
+    elif (( ${skew#-} > 120 )); then
         date -s "@$web_epoch" > /dev/null
         ok "Clock was off by ${skew}s, set to $(date -u '+%F %T') UTC"
     else
@@ -464,7 +576,10 @@ if [[ -e /dev/mapper/$CRYPT_NAME ]]; then
     cryptsetup close "$CRYPT_NAME" || die "/dev/mapper/$CRYPT_NAME is still in use; reboot the live ISO and try again"
     info "Closed $CRYPT_NAME left over from an earlier attempt"
 fi
-swapoff -a 2> /dev/null || true
+# Only swap on the target disk; the live system keeps its own
+for swap in $(swapon --show=NAME --noheadings 2> /dev/null); do
+    if [[ $swap == "$DISK"* ]]; then swapoff "$swap" || true; fi
+done
 wipefs -af "$DISK" > /dev/null
 sfdisk -q --wipe always "$DISK" << 'EOF'
 label: gpt
@@ -511,13 +626,15 @@ PACKAGES=(
     ufw ufw-dinit
     sudo git vim man-db bash-completion
 )
-# No GPU userspace (mesa etc.): that's up to the desktop installer
+# No mesa, Vulkan or VA-API: that's up to the desktop installer. The NVIDIA
+# module needs its own userspace, nvidia-utils, which pulls in mesa.
 case $CPU_VENDOR in
     intel) PACKAGES+=(intel-ucode) ;;
     amd)   PACKAGES+=(amd-ucode) ;;
     *)     PACKAGES+=(intel-ucode amd-ucode) ;;
 esac
 [[ $INSTALL_LTS == yes ]] && PACKAGES+=(linux-lts linux-lts-headers)
+[[ $INSTALL_NVIDIA == yes ]] && PACKAGES+=("${NVIDIA_PKGS[@]}")
 
 # -K: separate keyring for the new system
 basestrap -K "$MNT" "${PACKAGES[@]}"
@@ -553,7 +670,11 @@ ok "Keyring initialised and populated"
 
 step "Time zone, locale, keymap and host name"
 ln -sf "/usr/share/zoneinfo/$TIMEZONE" "$MNT/etc/localtime"
-in_chroot hwclock --systohc || warn "hwclock failed (normal in a container)"
+if [[ $TEST_IN_CONTAINER == yes ]]; then
+    info "Not setting the hardware clock in a test container"
+else
+    in_chroot hwclock --systohc || warn "Couldn't set the hardware clock"
+fi
 
 for loc in "$LOCALE" en_US.UTF-8; do
     charset=$(grep -m1 "^$loc " /usr/share/i18n/SUPPORTED | awk '{print $2}')
@@ -579,6 +700,8 @@ hooks="base udev autodetect microcode modconf kms keyboard keymap consolefont bl
 for h in $hooks; do
     [[ -e $MNT/usr/lib/initcpio/install/$h ]] || hooks=${hooks/ $h / }
 done
+# kms would put nouveau in the initramfs, before nvidia-utils' blacklist applies
+[[ $INSTALL_NVIDIA == yes ]] && hooks=${hooks/ kms / }
 sed -i "s/^HOOKS=.*/HOOKS=($hooks)/" "$MNT/etc/mkinitcpio.conf"
 grep -q '^HOOKS=(.*encrypt' "$MNT/etc/mkinitcpio.conf" || die "Couldn't set HOOKS in mkinitcpio.conf"
 info "HOOKS=($hooks)"
@@ -599,7 +722,7 @@ grep -q '^GRUB_SAVEDEFAULT=' "$MNT/etc/default/grub" || echo 'GRUB_SAVEDEFAULT=t
 sed -i '/^#\?GRUB_TOP_LEVEL=/d' "$MNT/etc/default/grub"
 echo 'GRUB_TOP_LEVEL="/boot/vmlinuz-linux"' >> "$MNT/etc/default/grub"
 
-if [[ $BOOT_MODE == UEFI ]]; then
+if [[ $BOOT_MODE == UEFI && $TEST_IN_CONTAINER != yes ]]; then
     in_chroot grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=artix
 else
     in_chroot grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=artix --no-nvram
@@ -627,6 +750,16 @@ else
     ok "User $USER_NAME created (wheel, sudo); root account locked"
 fi
 
+if [[ $AUDIO_LEGACY_HDA == yes ]]; then
+    step "Sound: older HDA driver"
+    cat > "$MNT/etc/modprobe.d/legacy-hda.conf" << 'EOF'
+# The older HDA driver instead of SOF (artix-install.sh). Delete this file
+# and reboot to use SOF again.
+options snd-intel-dspcfg dsp_driver=1
+EOF
+    ok "/etc/modprobe.d/legacy-hda.conf"
+fi
+
 step "Services"
 enable_service NetworkManager
 if [[ -e $MNT/etc/dinit.d/chronyd ]]; then enable_service chronyd; else enable_service chrony; fi
@@ -637,6 +770,25 @@ sed -i 's/^DEFAULT_INPUT_POLICY=.*/DEFAULT_INPUT_POLICY="DROP"/;
         s/^DEFAULT_FORWARD_POLICY=.*/DEFAULT_FORWARD_POLICY="DROP"/' "$MNT/etc/default/ufw"
 enable_service ufw
 ok "Enabled: ${ENABLED_SERVICES[*]}"
+
+if [[ $INSTALL_NVIDIA == yes ]]; then
+    step "NVIDIA driver"
+    for kdir in "$MNT"/usr/lib/modules/*/; do
+        [[ -e $kdir/vmlinuz ]] || continue
+        [[ -n $(find "$kdir" -name 'nvidia.ko*' -print -quit) ]] \
+            || die "The NVIDIA module wasn't built for kernel $(basename "$kdir"); see: artix-chroot $MNT dkms status"
+    done
+    if [[ $OTHER_GPU == yes ]]; then
+        # What Arch's nvidia-prime package contains; Artix doesn't have it
+        cat > "$MNT/usr/local/bin/prime-run" << 'EOF'
+#!/bin/sh
+export __NV_PRIME_RENDER_OFFLOAD=1 __VK_LAYER_NV_optimus=NVIDIA_only __GLX_VENDOR_LIBRARY_NAME=nvidia
+exec "$@"
+EOF
+        chmod 755 "$MNT/usr/local/bin/prime-run"
+    fi
+    ok "${NVIDIA_PKGS[0]} built for every kernel$([[ $OTHER_GPU == yes ]] && echo "; run a program on the NVIDIA GPU with: prime-run <program>")"
+fi
 
 # --- 8. Optional: AUR helper ---
 
@@ -668,69 +820,123 @@ step "Finishing"
 kernel_pkgs=(linux)
 if [[ $INSTALL_LTS == yes ]]; then kernel_pkgs+=(linux-lts); fi
 KERNELS=$(in_chroot pacman -Q "${kernel_pkgs[@]}" | awk '{printf "%s %s  ", $1, $2}')
-SUMMARY_DIR="$MNT/var/log/artix-install"
-mkdir -p "$SUMMARY_DIR"
+LOG_DIR="$MNT/var/log/artix-install"
+mkdir -p "$LOG_DIR"
+SUMMARY_FILE=/home/$USER_NAME/artix-install-summary.md
 
+if [[ $INSTALL_NVIDIA == yes ]]; then
+    nvidia_line="${NVIDIA_PKGS[*]}"
+    if [[ $OTHER_GPU == yes ]]; then
+        nvidia_line+="; run a program on the NVIDIA GPU with \`prime-run <program>\`"
+    fi
+elif [[ -n $NVIDIA_ID ]]; then
+    nvidia_line="not installed, the open nouveau driver is used"
+else
+    nvidia_line="no NVIDIA GPU"
+fi
+if [[ $AUDIO_LEGACY_HDA == yes ]]; then
+    sound_line="the older HDA driver instead of SOF (\`/etc/modprobe.d/legacy-hda.conf\`), see Sound"
+elif [[ $INTEL_AUDIO_DSP == yes ]]; then
+    sound_line="SOF, see Sound"
+else
+    sound_line="HDA"
+fi
+
+# Markdown; the backticks are escaped so the heredoc doesn't run them
 SUMMARY=$(cat << EOF
-================================================================================
- Artix Linux (dinit) installation summary            $(date '+%F %R %Z')
-================================================================================
- Hardware
-   Boot mode        : $BOOT_MODE
-   CPU vendor       : $CPU_VENDOR (microcode chosen for it)
+# Artix Linux installation summary
 
- Disk ($DISK, $(numfmt --to=iec "$DISK_SIZE"))
-   $PART_EFI : EFI system partition, FAT32, mounted at /boot (NOT encrypted)
-   $PART_ROOT : LUKS2 (UUID $LUKS_UUID)
-       -> /dev/mapper/$CRYPT_NAME : ext4, mounted at / (UUID $ROOT_FS_UUID)
-   Swap             : $([[ $SWAP_SIZE == 0 ]] && echo none || echo "/swapfile, $SWAP_SIZE GiB (inside the encrypted root)")
+Installed on $(date '+%F %R %Z') with artix-install.sh $SCRIPT_VERSION.
 
- System
-   Host name        : $HOST_NAME
-   Kernel(s)        : $KERNELS
-   Bootloader       : GRUB (EFI entry "artix" + fallback \\EFI\\BOOT\\BOOTX64.EFI)
-   Init             : dinit
-   Locale           : $LOCALE
-   Console keymap   : $KEYMAP (also used at the passphrase prompt)
-   Time zone        : $TIMEZONE
-   Fallback kernel  : $([[ $INSTALL_LTS == yes ]] && echo "linux-lts (GRUB > Advanced options for Artix Linux)" || echo "none")
+## Next steps
 
- Accounts
-   User             : $USER_NAME (groups: $(in_chroot id -nG "$USER_NAME"))
-   sudo             : %wheel ALL=(ALL:ALL) ALL  (/etc/sudoers.d/10-wheel)
-   root             : $([[ $ENABLE_ROOT == yes ]] && echo "enabled (password set)" || echo "locked - use sudo")
+1. Reboot and remove the USB stick.
+2. Type the disk passphrase at "Enter passphrase for $PART_ROOT".
+3. Log in as $USER_NAME. Connect to Wi-Fi with \`nmtui\`.
+4. Install a desktop, for example DARBS: $DARBS_URL
 
- Security
-   Disk encryption  : LUKS2, passphrase asked by the initramfs at boot
-   Firewall         : ufw, enabled at boot: deny incoming, allow outgoing
-                      Status: sudo ufw status verbose   Allow ssh: sudo ufw allow ssh
-                      GUI (after you install a desktop): sudo pacman -S gufw
-   Keyring          : initialised and populated (artix-keyring)
-   Mirrors          : ranked at install time, stock list in /etc/pacman.d/mirrorlist.stock
+## Hardware
 
- Services (dinit, /etc/dinit.d/boot.d)
-   ${ENABLED_SERVICES[*]}
+- Boot mode: $BOOT_MODE
+- CPU: $CPU_VENDOR, with its microcode
+- NVIDIA driver: $nvidia_line
+- Sound driver: $sound_line
 
- AUR
-   yay              : $([[ $ENABLE_AUR == yes ]] && echo "installed - AUR packages are unofficial, review PKGBUILDs ($AUR_WIKI)" || echo "not enabled")
+## Disk ($DISK, $(numfmt --to=iec "$DISK_SIZE"))
 
- Next steps
-   1. Reboot and remove the USB stick.
-   2. Type the disk passphrase at "Enter passphrase for $PART_ROOT".
-   3. Log in as $USER_NAME. Connect to Wi-Fi with: nmtui
-   4. Install a desktop, for example DARBS: $DARBS_URL
+- $PART_EFI: EFI system partition, FAT32, mounted at /boot (not encrypted)
+- $PART_ROOT: LUKS2 (UUID $LUKS_UUID), opened as /dev/mapper/$CRYPT_NAME: ext4, mounted at / (UUID $ROOT_FS_UUID)
+- Swap: $([[ $SWAP_SIZE == 0 ]] && echo none || echo "/swapfile, $SWAP_SIZE GiB, inside the encrypted root")
 
- This summary: /var/log/artix-install/summary.txt   Full log: /var/log/artix-install/install.log
-================================================================================
+## System
+
+- Host name: $HOST_NAME
+- Kernels: $KERNELS
+- Fallback kernel: $([[ $INSTALL_LTS == yes ]] && echo "linux-lts, in GRUB under Advanced options for Artix Linux" || echo none)
+- Bootloader: GRUB, EFI entry "artix" and the fallback path \\EFI\\BOOT\\BOOTX64.EFI
+- Init: dinit; enabled services (/etc/dinit.d/boot.d): ${ENABLED_SERVICES[*]}
+- Locale: $LOCALE
+- Console keymap: $KEYMAP, also used at the passphrase prompt
+- Time zone: $TIMEZONE
+- Mirrors: ranked at install time; the stock list is /etc/pacman.d/mirrorlist.stock
+- AUR: $([[ $ENABLE_AUR == yes ]] && echo "yay installed. AUR packages are unofficial, review their PKGBUILDs ($AUR_WIKI)" || echo "not enabled")
+
+## Accounts
+
+- User: $USER_NAME, groups: $(in_chroot id -nG "$USER_NAME")
+- sudo: \`%wheel ALL=(ALL:ALL) ALL\` in /etc/sudoers.d/10-wheel
+- root: $([[ $ENABLE_ROOT == yes ]] && echo "enabled, password set" || echo "locked, use sudo")
+
+## Security
+
+- Disk encryption: LUKS2, the initramfs asks for the passphrase at boot
+- Firewall: ufw, enabled at boot: deny incoming, allow outgoing.
+  Status: \`sudo ufw status verbose\`. Allow ssh: \`sudo ufw allow ssh\`.
+  A GUI, after you install a desktop: \`sudo pacman -S gufw\`
+- Keyring: initialised and populated (artix-keyring)
 EOF
 )
 
-echo "$SUMMARY" > "$SUMMARY_DIR/summary.txt"
-chmod 644 "$SUMMARY_DIR/summary.txt"
-printf '\n%s\n' "$SUMMARY"
+if [[ $INTEL_AUDIO_DSP == yes ]]; then
+    if [[ $AUDIO_LEGACY_HDA == yes ]]; then
+        SUMMARY+=$(cat << 'EOF'
 
-cp "$LOG" "$SUMMARY_DIR/install.log"
-chmod 600 "$SUMMARY_DIR/install.log"
+
+## Sound
+
+The older HDA driver is used instead of SOF, set in /etc/modprobe.d/legacy-hda.conf.
+The built-in digital microphones don't work with it. To use SOF again, run
+`sudo rm /etc/modprobe.d/legacy-hda.conf` (with DARBS: `sound-fix sof`) and reboot.
+EOF
+)
+    else
+        SUMMARY+=$(cat << 'EOF'
+
+
+## Sound
+
+The SOF driver is used. If you only get a "Dummy Output" (DARBS's bar shows
+`vol dummy`), switch to the older HDA driver; the built-in digital microphones
+don't work with it. With DARBS, run `sound-fix`. Without it, run
+`echo 'options snd-intel-dspcfg dsp_driver=1' | sudo tee /etc/modprobe.d/legacy-hda.conf`.
+Then reboot.
+EOF
+)
+    fi
+fi
+SUMMARY+=$'\n\n'"The full installation log: /var/log/artix-install/install.log"
+
+printf '\n%s\n\n' "$SUMMARY"
+ask_yes_no SAVE_SUMMARY "Save this summary as $SUMMARY_FILE?" y
+if [[ $SAVE_SUMMARY == yes ]]; then
+    printf '%s\n' "$SUMMARY" > "$MNT$SUMMARY_FILE"
+    in_chroot chown "$USER_NAME:" "$SUMMARY_FILE"
+    chmod 644 "$MNT$SUMMARY_FILE"
+    ok "Summary saved as $SUMMARY_FILE"
+fi
+
+cp "$LOG" "$LOG_DIR/install.log"
+chmod 600 "$LOG_DIR/install.log"
 
 sync
 stop_chroot_processes

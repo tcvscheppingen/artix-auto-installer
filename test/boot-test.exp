@@ -1,8 +1,10 @@
 #!/usr/bin/expect -f
-# Boots the installed disk like a ThinkPad: UEFI with empty NVRAM (so the
-# fallback BOOTX64.EFI is used), q35, NVMe, e1000e. TCG is slow, hence the timeouts.
+# Boots the installed disk like a laptop: UEFI with empty NVRAM (so the
+# fallback BOOTX64.EFI is used), q35, NVMe, e1000e, Intel HDA sound (no
+# host audio). TCG is slow, hence the timeouts.
 set timeout 900
-log_file -noappend /logs/boot.log
+if {[info exists env(BOOT_LOG)]} { set boot_log $env(BOOT_LOG) } else { set boot_log boot.log }
+log_file -noappend /logs/$boot_log
 
 set luks "luks-test-passphrase"
 set user "tester"
@@ -13,11 +15,13 @@ spawn qemu-system-x86_64 -machine q35 -cpu max -smp 4 -m 4096 \
     -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
     -drive if=pflash,format=raw,file=/tmp/vars.fd \
     -drive file=/out/disk.img,if=none,id=nvm,format=raw \
-    -device nvme,serial=T14S-NVME,drive=nvm \
+    -device nvme,serial=TEST-NVME,drive=nvm \
     -netdev user,id=n0 -device e1000e,netdev=n0 \
+    -audiodev none,id=snd0 -device ich9-intel-hda -device hda-output,audiodev=snd0 \
     -nographic -no-reboot
 
-proc fail {msg} { puts "\nBOOT TEST FAILED: $msg"; exit 1 }
+# send_user, not puts: only that reaches the log file
+proc fail {msg} { send_user "\nBOOT TEST FAILED: $msg\n"; exit 1 }
 
 expect {
     "Enter passphrase for" {}
@@ -25,7 +29,7 @@ expect {
     "Kernel panic" { fail "kernel panic" }
     timeout { fail "no passphrase prompt" }
 }
-puts "\n>>> TEST: passphrase prompt reached, typing passphrase"
+send_user "\n>>> TEST: passphrase prompt reached, typing passphrase"
 sleep 1
 send -- "$luks\r"
 
@@ -34,13 +38,13 @@ expect {
     "login:" {}
     timeout { fail "no login prompt after unlock" }
 }
-puts "\n>>> TEST: login prompt reached"
+send_user "\n>>> TEST: login prompt reached"
 
 set passed 0
 set failed 0
 proc check {ok name} {
     global passed failed
-    if {$ok} { puts "\nPASS  $name"; incr passed } else { puts "\nFAIL  $name"; incr failed }
+    if {$ok} { send_user "\nPASS  $name\n"; incr passed } else { send_user "\nFAIL  $name\n"; incr failed }
 }
 
 # --- Login, through getty + PAM ---
@@ -117,6 +121,6 @@ expect {
     eof {}
     timeout {}
 }
-puts "\n== BOOT TEST TOTAL: $passed passed, $failed failed"
-if {$failed != 0} { puts "BOOT TEST: $failed check(s) failed"; exit 1 }
-puts "BOOT TEST PASSED"
+send_user "\n== BOOT TEST TOTAL: $passed passed, $failed failed\n"
+if {$failed != 0} { send_user "BOOT TEST: $failed check(s) failed\n"; exit 1 }
+send_user "BOOT TEST PASSED\n"
