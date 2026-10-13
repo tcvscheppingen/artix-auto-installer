@@ -185,6 +185,10 @@ write_report() {
             echo "## Checks: $s ($(plain "$log" | grep -cE '^PASS  ') passed, $(plain "$log" | grep -cE '^FAIL  ') failed)"
             echo
             check_table "$log"
+            if plain "$log" | grep -q '^NOTE  '; then
+                echo
+                plain "$log" | sed -n 's/^NOTE  /- Note: /p'
+            fi
         done
 
         for s in "${STAGES[@]}"; do

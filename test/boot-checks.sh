@@ -27,6 +27,14 @@ check "sudoers grants tester (ALL : ALL)" sh -c "sudo -l -U tester | grep -q '(A
 check "root password locked"            sh -c "passwd -S root | awk '{print \$2}' | grep -qx L"
 check "yay runs"                        sh -c "yay --version"
 check "sound card found"                grep -q . /proc/asound/cards
+# Artix's udevd handover (udevadm control --exit, then a new udevd) loses the
+# events sent in between. A sound card that finishes probing then, as in the
+# slow VM, keeps root-only permissions; PipeWire then only has a Dummy Output.
+if [ -e /dev/snd/controlC0 ] && [ "$(stat -c %G /dev/snd/controlC0)" != audio ]; then
+    echo "NOTE  udev missed the sound card at boot (Artix udevd handover); running its rules again"
+    udevadm trigger --subsystem-match=sound --action=add
+    udevadm settle
+fi
 if [ -e /etc/modprobe.d/legacy-hda.conf ]; then
     check "older HDA driver option active" grep -qx 1 /sys/module/snd_intel_dspcfg/parameters/dsp_driver
 fi
@@ -37,13 +45,23 @@ if [ -x /usr/local/bin/dwm ]; then
     done
     # turnstile starts the user's dinit, and so PipeWire, when tester logs in
     check "PipeWire runs for tester"        sh -c "for i in \$(seq 30); do pgrep -u tester -x pipewire && exit 0; sleep 2; done; exit 1"
-    check "PipeWire uses the sound card, not Dummy Output" \
-        sh -c "su tester -c 'XDG_RUNTIME_DIR=/run/user/\$(id -u tester) wpctl inspect @DEFAULT_AUDIO_SINK@' | grep -q 'node.name = \"alsa_output'"
-    su tester -c "XDG_RUNTIME_DIR=/run/user/$(id -u tester) wpctl status" 2> /dev/null | sed -n '/^Audio/,/^Video/p' | head -n 15
-    loginctl list-sessions --no-legend 2> /dev/null
-    ls -l /dev/snd 2> /dev/null
     as_tester="su tester -c"
     run="XDG_RUNTIME_DIR=/run/user/$(id -u tester)"
+    sink_is_card() { $as_tester "$run wpctl inspect @DEFAULT_AUDIO_SINK@" 2> /dev/null | grep -q 'node.name = "alsa_output'; }
+    # The emulated card can show up late on the slow emulated CPU
+    for _ in $(seq 30); do sink_is_card && break; sleep 2; done
+    if ! sink_is_card; then
+        wp=$(pgrep -u tester -x wireplumber | head -n 1)
+        echo "NOTE  no sound card in WirePlumber after 60 s; wireplumber $(grep '^Groups' "/proc/$wp/status" 2> /dev/null)"
+        dmesg | grep -i -E 'snd|hda' | tail -n 4 | sed 's/^/NOTE  kernel: /'
+        $as_tester "$run dinitctl --user restart wireplumber" > /dev/null 2>&1
+        for _ in $(seq 15); do sink_is_card && break; sleep 2; done
+        if sink_is_card; then echo "NOTE  after restarting WirePlumber it has the sound card"; else echo "NOTE  restarting WirePlumber didn't help"; fi
+    fi
+    check "PipeWire uses the sound card, not Dummy Output" sink_is_card
+    $as_tester "$run wpctl status" 2> /dev/null | sed -n '/^Audio/,/^Video/p' | head -n 15
+    loginctl list-sessions --no-legend 2> /dev/null
+    ls -l /dev/snd 2> /dev/null
     check "volume block shows the volume"   sh -c "$as_tester '$run ~/.local/bin/statusbar/sb-volume' | grep -qE '^vol [0-9]+%'"
     check "sound-fix: HDA driver in use"    sh -c "$as_tester '$run ~/.local/bin/sound-fix status' | grep -q '^Driver: HDA'"
     check "sound-fix: sound works"          sh -c "$as_tester '$run ~/.local/bin/sound-fix' | grep -q '^Sound works'"
@@ -67,7 +85,8 @@ if [ -x /usr/local/bin/dwm ]; then
     su tester -c "DISPLAY=:2 XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus thunar" > /dev/null 2>&1 &
     # Time for the wallpaper, bar and st on the slow emulated CPU
     sleep 30
-    check "X keyboard: us international"    grep -q 'XkbVariant.*intl' /tmp/Xorg.dwm.log
+    # Xorg logs the option as xkb_variant, not XkbVariant like in the file
+    check "X keyboard: us international"    grep -qiE 'xkb_?variant" "intl"' /tmp/Xorg.dwm.log
     check "Thunar opens"                    sh -c "pgrep -u tester -x thunar"
     check "screenshot of dwm"               su tester -c 'DISPLAY=:2 maim /var/tmp/darbs-screenshot.png'
     pkill -x xinit
