@@ -1,3 +1,4 @@
 test/out/
 install.conf
 .DS_STORE
+.vscode
