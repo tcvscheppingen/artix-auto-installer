@@ -94,4 +94,4 @@ Each desktop's logs, screenshots and report end up in `test/out/<desktop>/`, so 
 
 ## Disclaimer
 I wrote this script with assistance from a Large Language Model.   
-I have reviewed the script in its entirety and validated it by running it in a VM, and I have used it to install Artix on a personal device.
+Never run any scripts without checking the contents first.
