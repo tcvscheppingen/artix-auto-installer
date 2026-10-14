@@ -2,19 +2,23 @@
 #
 # artix-install.sh - automated Artix Linux (dinit) installation
 #
-# Installs a minimal Artix with dinit that boots to a TTY:
+# Installs a minimal Artix with dinit:
 #   * UEFI only, GPT, 1 GiB unencrypted EFI partition mounted at /boot
 #   * LUKS2 encrypted root (ext4); the initramfs asks for the passphrase
 #   * GRUB, NetworkManager, chrony, ufw firewall (deny incoming)
 #   * optional: linux-lts fallback kernel, NVIDIA driver, yay (AUR)
+#   * optional desktop: KDE Plasma, Cinnamon or XFCE, or sway
+#     (https://github.com/tcvscheppingen/SARBS) or dwm
+#     (https://github.com/tcvscheppingen/DARBS); without one it boots to a TTY
 #
 # For UEFI PCs and laptops with an Intel or AMD CPU. Run it as root from the
-# Artix base dinit live ISO. Afterwards, install a desktop with
-# https://github.com/tcvscheppingen/DARBS
+# Artix base dinit live ISO.
 #
 # Usage:
 #   ./artix-install.sh                  # interactive
 #   ./artix-install.sh --config FILE    # preset answers (see install.conf.example)
+#   ./artix-install.sh --print-desktop-packages plasma|cinnamon|xfce
+#                                       # the packages of a desktop environment
 #
 # Every variable listed in install.conf.example can also be set in the
 # environment. Anything not set is asked for.
@@ -26,6 +30,9 @@ readonly MNT=/mnt
 readonly LOG=/tmp/artix-install.log
 readonly AUR_WIKI="https://wiki.archlinux.org/title/Arch_User_Repository"
 readonly DARBS_URL="https://github.com/tcvscheppingen/DARBS"
+readonly SARBS_URL="https://github.com/tcvscheppingen/SARBS"
+# Lets the user's rice script use sudo without a password during the install
+readonly RICE_SUDOERS=/etc/sudoers.d/99-artix-install
 
 # --- Output helpers ---
 
@@ -78,6 +85,33 @@ ask_yes_no() {
             n|N|no|No)   _yn=no;  return 0 ;;
         esac
         warn "Please answer y or n."
+    done
+}
+
+# ask_choice VAR "Question" default "name:description"... -> VAR is one of
+# the names. The answer can be the name or its number in the list.
+ask_choice() {
+    local -n _ch=$1
+    local var=$1 question=$2 default=$3 answer opt i=0
+    shift 3
+    local names=()
+    for opt; do names+=("${opt%%:*}"); done
+    if [[ -n ${_ch-} ]]; then
+        [[ " ${names[*]} " == *" $_ch "* ]] || die "$var=$_ch is not one of: ${names[*]}"
+        return 0
+    fi
+    for opt; do
+        i=$((i + 1))
+        printf '    %d) %-9s %s\n' "$i" "${opt%%:*}" "${opt#*:}"
+    done
+    while :; do
+        read -r -p "$question [$default]: " answer
+        answer=${answer:-$default}
+        if [[ $answer =~ ^[0-9]+$ ]] && (( answer >= 1 && answer <= ${#names[@]} )); then
+            answer=${names[answer - 1]}
+        fi
+        if [[ " ${names[*]} " == *" $answer "* ]]; then _ch=$answer; return 0; fi
+        warn "Choose a number from the list, or one of: ${names[*]}"
     done
 }
 
@@ -199,13 +233,15 @@ rank_mirrors() {
 }
 
 # Sets NVIDIA_ID (PCI device ID of the first NVIDIA GPU), OTHER_GPU (an
-# Intel/AMD GPU next to it: hybrid laptop) and NVIDIA_PKGS. By generation:
+# Intel/AMD GPU next to it: hybrid laptop), GPU_PKGS (Vulkan and VA-API for
+# the Intel/AMD GPUs, for the desktop environments) and NVIDIA_PKGS. By generation:
 # Turing and newer (>= 0x1e00) use the open kernel modules, Maxwell to Volta
 # (>= 0x1340) the 580xx branch, and Kepler and older have no packaged driver.
 detect_gpus() {
     local dev class vendor id
     OTHER_GPU=no
     NVIDIA_PKGS=()
+    GPU_PKGS=()
     for dev in /sys/bus/pci/devices/*; do
         [[ -r $dev/class ]] || continue
         read -r class < "$dev/class"
@@ -214,8 +250,13 @@ detect_gpus() {
         read -r id < "$dev/device"
         if [[ $vendor == 0x10de ]]; then
             [[ -n $NVIDIA_ID ]] || NVIDIA_ID=$id
-        elif [[ $vendor == 0x8086 || $vendor == 0x1002 ]]; then
+        elif [[ $vendor == 0x8086 ]]; then
             OTHER_GPU=yes
+            [[ " ${GPU_PKGS[*]} " == *" vulkan-intel "* ]] || GPU_PKGS+=(vulkan-intel intel-media-driver)
+        elif [[ $vendor == 0x1002 ]]; then
+            OTHER_GPU=yes
+            # AMD's VA-API driver is part of mesa
+            [[ " ${GPU_PKGS[*]} " == *" vulkan-radeon "* ]] || GPU_PKGS+=(vulkan-radeon)
         fi
     done
     [[ -n $NVIDIA_ID ]] || return 0
@@ -254,6 +295,114 @@ detect_audio() {
     return 0
 }
 
+# The packages of a desktop environment, without the GPU drivers. turnstile
+# starts the user's own dinit at login, which runs PipeWire (Artix has no
+# other way to start it); blocaled is the locale1 D-Bus service that the
+# desktops' keyboard settings use.
+desktop_packages() {
+    local common=(
+        xorg-server xorg-xwayland dbus-dinit turnstile turnstile-dinit
+        pipewire pipewire-pulse pipewire-alsa pipewire-jack wireplumber
+        pipewire-dinit pipewire-pulse-dinit wireplumber-dinit
+        bluez bluez-utils bluez-dinit blocaled xdg-user-dirs xdg-utils
+        noto-fonts noto-fonts-emoji ttf-liberation librewolf
+    )
+    case $1 in
+        plasma)   printf '%s\n' "${common[@]}" plasma-meta konsole dolphin kate ark gwenview okular spectacle \
+                      sddm sddm-dinit ;;
+        cinnamon) printf '%s\n' "${common[@]}" cinnamon gnome-terminal gnome-keyring file-roller eog \
+                      pavucontrol blueman lightdm lightdm-dinit lightdm-gtk-greeter ;;
+        xfce)     printf '%s\n' "${common[@]}" xfce4 xfce4-goodies gnome-keyring pavucontrol network-manager-applet \
+                      blueman lightdm lightdm-dinit lightdm-gtk-greeter ;;
+        *)        return 1 ;;
+    esac
+}
+
+desktop_label() {
+    case $1 in
+        none)     echo "none (boots to a TTY)" ;;
+        plasma)   echo "KDE Plasma, SDDM login screen" ;;
+        cinnamon) echo "Cinnamon, LightDM login screen" ;;
+        xfce)     echo "XFCE, LightDM login screen" ;;
+        sway|dwm)
+            case $DESKTOP_LOGIN in
+                tty)  echo "$1 ($([[ $1 == sway ]] && echo SARBS || echo DARBS)), starts on TTY1 login" ;;
+                dm)   echo "$1 ($([[ $1 == sway ]] && echo SARBS || echo DARBS)), LightDM login screen" ;;
+                none) echo "$1 ($([[ $1 == sway ]] && echo SARBS || echo DARBS)), start it yourself" ;;
+            esac ;;
+    esac
+}
+
+# KDE Plasma, Cinnamon or XFCE, with their display manager
+install_desktop_environment() {
+    local pkgs dm svc dir
+    mapfile -t pkgs < <(desktop_packages "$DESKTOP")
+    chroot_pacman -S --needed --noconfirm "${pkgs[@]}" ${GPU_PKGS[@]+"${GPU_PKGS[@]}"}
+    if [[ $DESKTOP == plasma ]]; then
+        dm=sddm
+        mkdir -p "$MNT/etc/sddm.conf.d"
+        printf '# artix-install.sh\n[Theme]\nCurrent=breeze\n' > "$MNT/etc/sddm.conf.d/10-theme.conf"
+    else
+        dm=lightdm
+        mkdir -p "$MNT/etc/lightdm/lightdm.conf.d"
+        # logind-check-graphical: wait for the GPU, like Artix's own desktop ISOs
+        cat > "$MNT/etc/lightdm/lightdm.conf.d/50-artix-install.conf" << EOF
+# artix-install.sh
+[LightDM]
+logind-check-graphical=true
+[Seat:*]
+greeter-session=lightdm-gtk-greeter
+user-session=$DESKTOP
+EOF
+    fi
+    for svc in dbus turnstiled bluetoothd "$dm"; do enable_service "$svc"; done
+    # PipeWire as the user's own services, started by turnstile at login
+    dir=/home/$USER_NAME/.config/dinit.d/boot.d
+    mkdir -p "$MNT$dir"
+    for svc in pipewire pipewire-pulse wireplumber; do
+        [[ -e $MNT/etc/dinit.d/user/$svc ]] || die "dinit user service '$svc' not found in the new system"
+        ln -sfn "/etc/dinit.d/user/$svc" "$MNT$dir/$svc"
+    done
+    in_chroot chown -R "$USER_NAME:" "/home/$USER_NAME/.config"
+    ok "$(desktop_label "$DESKTOP"); enabled: dbus turnstiled bluetoothd $dm; PipeWire for $USER_NAME"
+}
+
+# Undoes what install_rice changes only for the time the rice script runs
+rice_cleanup() {
+    rm -f "$MNT$RICE_SUDOERS"
+    # pacman.conf has no comments after a directive, so the marker is the line before
+    [[ -e $MNT/etc/pacman.conf ]] && sed -i '/^# artix-install.sh, until the rice script is done:$/{N;d}' "$MNT/etc/pacman.conf"
+    return 0
+}
+
+# sway or dwm: runs SARBS's or DARBS's auto-rice-artix.sh as the user, the
+# way the user would run it after the first boot
+install_rice() {
+    local name repo dir rc=0
+    if [[ $DESKTOP == sway ]]; then name=SARBS; repo=${SARBS_REPO:-$SARBS_URL}
+    else                           name=DARBS; repo=${DARBS_REPO:-$DARBS_URL}; fi
+    dir=/home/$USER_NAME/$name
+    rm -rf "${MNT:?}$dir"
+    if [[ -d $repo ]]; then
+        cp -a "$repo" "$MNT$dir"   # a local checkout (tests)
+        in_chroot chown -R "$USER_NAME:" "$dir"
+    else
+        in_chroot su - "$USER_NAME" -c "git clone --depth 1 '$repo' '$dir'"
+    fi
+    info "$name commit $(in_chroot git -c safe.directory='*' -C "$dir" rev-parse --short HEAD 2> /dev/null || echo unknown)"
+
+    printf '%s ALL=(ALL:ALL) NOPASSWD: ALL\n' "$USER_NAME" > "$MNT$RICE_SUDOERS"
+    chmod 440 "$MNT$RICE_SUDOERS"
+    if [[ $PACMAN_CHROOT_OPTS == *--disable-sandbox* ]]; then
+        sed -i 's/^\[options\]$/&\n# artix-install.sh, until the rice script is done:\nDisableSandbox/' "$MNT/etc/pacman.conf"
+    fi
+    # Enter answers anything else the script asks with its default
+    in_chroot su - "$USER_NAME" -c "cd '$dir' && RICE_LOGIN=$DESKTOP_LOGIN ./auto-rice-artix.sh" < <(yes '') || rc=$?
+    rice_cleanup
+    (( rc == 0 )) || die "$name's auto-rice-artix.sh failed (exit code $rc)"
+    ok "$(desktop_label "$DESKTOP")"
+}
+
 # gpg-agent/dirmngr started in the chroot keep running and block umount
 stop_chroot_processes() {
     local pid
@@ -273,6 +422,7 @@ cleanup() {
         printf '\n%sThe installation failed (exit code %s). See %s%s\n' "$C_RED" "$rc" "$LOG" "$C_RST" >&2
     fi
     if mountpoint -q "$MNT" 2> /dev/null; then
+        rice_cleanup
         stop_chroot_processes
         umount -R "$MNT" 2> /dev/null
     fi
@@ -291,6 +441,9 @@ CONFIG_FILE=""
 while (( $# )); do
     case $1 in
         -c|--config) CONFIG_FILE=${2-}; shift 2 ;;
+        --print-desktop-packages)
+            desktop_packages "${2-}" || die "Desktop environments: plasma, cinnamon, xfce"
+            exit 0 ;;
         -h|--help)   usage ;;
         *)           die "Unknown option: $1 (see --help)" ;;
     esac
@@ -318,6 +471,9 @@ INSTALL_LTS=${INSTALL_LTS-}
 INSTALL_NVIDIA=${INSTALL_NVIDIA-}
 AUDIO_LEGACY_HDA=${AUDIO_LEGACY_HDA-}
 ENABLE_AUR=${ENABLE_AUR-}
+DESKTOP=${DESKTOP-}
+DESKTOP_LOGIN=${DESKTOP_LOGIN-}
+SWAY_WITHOUT_NVIDIA=${SWAY_WITHOUT_NVIDIA-}
 SAVE_SUMMARY=${SAVE_SUMMARY-}
 CONFIRM_WIPE=${CONFIRM_WIPE-}
 REBOOT_WHEN_DONE=${REBOOT_WHEN_DONE-}
@@ -333,6 +489,9 @@ CRYPT_NAME=${CRYPT_NAME:-cryptroot}
 # yes: a container on someone's computer, so don't touch its EFI boot
 # entries, clock or console keymap
 TEST_IN_CONTAINER=${TEST_IN_CONTAINER-no}
+# A git URL or a local checkout of SARBS/DARBS (tests: a local checkout)
+SARBS_REPO=${SARBS_REPO-}
+DARBS_REPO=${DARBS_REPO-}
 
 ENABLED_SERVICES=()
 
@@ -348,7 +507,7 @@ cat << EOF
 ${C_BLU}
   Artix Linux (dinit) installer v$SCRIPT_VERSION
   -------------------------------------------
-  UEFI + GRUB, LUKS2 encrypted root, boots to a TTY.
+  UEFI + GRUB, LUKS2 encrypted root, optional desktop.
   The whole target disk will be ERASED.
 ${C_RST}
 EOF
@@ -544,6 +703,40 @@ EOF
 printf '%s' "$C_RST"
 ask_yes_no ENABLE_AUR "Enable the AUR (installs the yay AUR helper)?" n
 
+info ""
+info "A desktop environment with its login screen, or my sway or dwm setup"
+info "(SARBS/DARBS on GitHub). Without one the system boots to a text console."
+desktop_preset=$DESKTOP
+while :; do
+    ask_choice DESKTOP "Desktop" none \
+        "none:no desktop, boots to a TTY" \
+        "plasma:KDE Plasma (SDDM login screen)" \
+        "cinnamon:Cinnamon (LightDM login screen)" \
+        "xfce:XFCE (LightDM login screen)" \
+        "sway:sway, my Wayland setup (SARBS)" \
+        "dwm:dwm, my X11 setup (DARBS)"
+    [[ $DESKTOP == sway && $INSTALL_NVIDIA == yes ]] || break
+    # sway refuses to start when NVIDIA's driver is loaded
+    warn "sway doesn't support NVIDIA's driver and won't start with it."
+    info "Without it, the open nouveau driver is used for the NVIDIA GPU$([[ $OTHER_GPU == yes ]] && echo ", and sway runs on the Intel/AMD GPU")."
+    ask_yes_no SWAY_WITHOUT_NVIDIA "Install sway without NVIDIA's driver?" y
+    if [[ $SWAY_WITHOUT_NVIDIA == yes ]]; then
+        INSTALL_NVIDIA=no
+        break
+    fi
+    [[ -z $desktop_preset ]] || die "DESKTOP=sway needs INSTALL_NVIDIA=no or SWAY_WITHOUT_NVIDIA=yes: sway doesn't support NVIDIA's driver"
+    DESKTOP="" SWAY_WITHOUT_NVIDIA=""
+    info "Choose another desktop then."
+done
+if [[ $DESKTOP == sway || $DESKTOP == dwm ]]; then
+    ask_choice DESKTOP_LOGIN "Start $DESKTOP" dm \
+        "tty:automatically when you log in on TTY1" \
+        "dm:from a minimal graphical login screen (LightDM)" \
+        "none:neither, start it yourself"
+else
+    DESKTOP_LOGIN=""
+fi
+
 # --- 3. Confirmation ---
 
 step "Overview"
@@ -562,6 +755,7 @@ cat << EOF
     NVIDIA driver   : $([[ $INSTALL_NVIDIA == yes ]] && echo "${NVIDIA_PKGS[*]}" || echo no)
     Sound driver    : $([[ $AUDIO_LEGACY_HDA == yes ]] && echo "older HDA driver (no SOF)" || echo default)
     AUR (yay)       : $ENABLE_AUR
+    Desktop         : $(desktop_label "$DESKTOP")
     Firewall        : ufw (deny incoming, allow outgoing)
 EOF
 
@@ -662,7 +856,7 @@ PACKAGES=(
     ufw ufw-dinit
     sudo git vim man-db bash-completion
 )
-# No mesa, Vulkan or VA-API: that's up to the desktop installer. The NVIDIA
+# No mesa, Vulkan or VA-API: the desktop step installs those. The NVIDIA
 # module needs its own userspace, nvidia-utils, which pulls in mesa.
 case $CPU_VENDOR in
     intel) PACKAGES+=(intel-ucode) ;;
@@ -862,7 +1056,18 @@ if [[ $ENABLE_AUR == yes ]]; then
     ok "yay $(in_chroot pacman -Q yay | awk '{print $2}') installed"
 fi
 
-# --- 9. Summary ---
+# --- 9. Optional: desktop ---
+
+case $DESKTOP in
+    plasma|cinnamon|xfce)
+        step "Installing $(desktop_label "$DESKTOP") (this takes a while)"
+        install_desktop_environment ;;
+    sway|dwm)
+        step "Installing $(desktop_label "$DESKTOP") (this takes a while)"
+        install_rice ;;
+esac
+
+# --- 10. Summary ---
 
 step "Finishing"
 kernel_pkgs=(linux)
@@ -890,6 +1095,23 @@ else
     sound_line="HDA"
 fi
 
+case $DESKTOP in
+    none)
+        login_step="Log in as $USER_NAME. Connect to Wi-Fi with \`nmtui\`."
+        desktop_step=$'\n'"4. Install a desktop, for example DARBS: $DARBS_URL or SARBS: $SARBS_URL" ;;
+    plasma|cinnamon|xfce)
+        login_step="Log in as $USER_NAME on the login screen. Connect to Wi-Fi with the network icon in the panel."
+        desktop_step="" ;;
+    sway|dwm)
+        case $DESKTOP_LOGIN in
+            tty)  login_step="Log in as $USER_NAME on TTY1; $DESKTOP starts by itself." ;;
+            dm)   login_step="Log in as $USER_NAME on the login screen ($DESKTOP session)." ;;
+            none) login_step="Log in as $USER_NAME and start $DESKTOP (see the README in ~/$([[ $DESKTOP == sway ]] && echo SARBS || echo DARBS))." ;;
+        esac
+        login_step+=" Connect to Wi-Fi with the network icon in the bar, or \`nmtui\`."
+        desktop_step="" ;;
+esac
+
 # Markdown; the backticks are escaped so the heredoc doesn't run them
 SUMMARY=$(cat << EOF
 # Artix Linux installation summary
@@ -900,8 +1122,7 @@ Installed on $(date '+%F %R %Z') with artix-install.sh $SCRIPT_VERSION.
 
 1. Reboot and remove the USB stick.
 2. Type the disk passphrase at "Enter passphrase for $PART_ROOT".
-3. Log in as $USER_NAME. Connect to Wi-Fi with \`nmtui\`.
-4. Install a desktop, for example DARBS: $DARBS_URL
+3. $login_step$desktop_step
 
 ## Hardware
 
@@ -928,6 +1149,7 @@ Installed on $(date '+%F %R %Z') with artix-install.sh $SCRIPT_VERSION.
 - Keyboard in X: $(if [[ -n $X11_LAYOUT ]]; then echo "$X11_LAYOUT${X11_VARIANT:+ ($X11_VARIANT)}, in /etc/X11/xorg.conf.d/00-keyboard.conf"; else echo "not set (no X layout known for $KEYMAP); set it in /etc/X11/xorg.conf.d/00-keyboard.conf"; fi)
 - Time zone: $TIMEZONE
 - Mirrors: ranked at install time; the stock list is /etc/pacman.d/mirrorlist.stock
+- Desktop: $(desktop_label "$DESKTOP")$([[ $DESKTOP == sway || $DESKTOP == dwm ]] && echo "; the rice is in ~/$([[ $DESKTOP == sway ]] && echo SARBS || echo DARBS)")
 - AUR: $([[ $ENABLE_AUR == yes ]] && echo "yay installed. AUR packages are unofficial, review their PKGBUILDs ($AUR_WIKI)" || echo "not enabled")
 
 ## Accounts
@@ -941,7 +1163,7 @@ Installed on $(date '+%F %R %Z') with artix-install.sh $SCRIPT_VERSION.
 - Disk encryption: LUKS2, the initramfs asks for the passphrase at boot
 - Firewall: ufw, enabled at boot: deny incoming, allow outgoing.
   Status: \`sudo ufw status verbose\`. Allow ssh: \`sudo ufw allow ssh\`.
-  A GUI, after you install a desktop: \`sudo pacman -S gufw\`
+  A GUI: $([[ $DESKTOP == plasma ]] && echo "System Settings > Firewall" || echo "\`sudo pacman -S gufw\`")
 - Keyring: initialised and populated (artix-keyring)
 EOF
 )

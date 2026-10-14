@@ -25,7 +25,10 @@ check "console keymap us-acentos active" sh -c "dumpkeys -C /dev/tty1 | grep -q 
 check "user is in wheel"                sh -c "id -nG tester | grep -qw wheel"
 check "sudoers grants tester (ALL : ALL)" sh -c "sudo -l -U tester | grep -q '(ALL : ALL) ALL'"
 check "root password locked"            sh -c "passwd -S root | awk '{print \$2}' | grep -qx L"
-check "yay runs"                        sh -c "yay --version"
+# yay only when the test enabled the AUR (verify checks which)
+if command -v yay > /dev/null; then
+    check "yay runs"                    sh -c "yay --version"
+fi
 check "sound card found"                grep -q . /proc/asound/cards
 # Artix's udevd handover (udevadm control --exit, then a new udevd) loses the
 # events sent in between. A sound card that finishes probing then, as in the
@@ -38,15 +41,54 @@ fi
 if [ -e /etc/modprobe.d/legacy-hda.conf ]; then
     check "older HDA driver option active" grep -qx 1 /sys/module/snd_intel_dspcfg/parameters/dsp_driver
 fi
-if [ -x /usr/local/bin/dwm ]; then
-    echo "== DARBS"
-    for s in dbus turnstiled; do
+DESKTOP=$(cat /etc/artix-test-desktop 2> /dev/null || echo none)
+if [ "$DESKTOP" != none ]; then
+    echo "== Desktop: $DESKTOP"
+    # The display manager, and the process that shows the session runs
+    case $DESKTOP in
+        plasma)   dm=sddm;    session=plasmashell ;;
+        cinnamon) dm=lightdm; session=cinnamon ;;
+        xfce)     dm=lightdm; session=xfce4-session ;;
+        sway)     dm=lightdm; session=sway ;;
+        dwm)      dm=lightdm; session=dwm ;;
+    esac
+    uid=$(id -u tester)
+    as_tester="su tester -c"
+    run="XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus"
+    for s in dbus turnstiled $dm; do
         check "dinit service $s started"    sh -c "dinitctl status $s | grep -qi 'started'"
     done
+    case $dm in
+        sddm)    greeter='sddm-greeter(-qt6)?' ;;
+        lightdm) greeter=lightdm-gtk-greeter ;;
+    esac
+    # The greeter's X server: its display (SDDM passes none: :0) and auth file
+    greeter_x() {
+        local args
+        args=$(pgrep -af '^/usr/(lib|bin)/X(org)? .*-auth ' | head -n 1)
+        [ -n "$args" ] || return 1
+        gdisplay=$(echo "$args" | grep -oE ' :[0-9]+' | tr -d ' ' | head -n 1)
+        gdisplay=${gdisplay:-:0}
+        gauth=$(echo "$args" | sed -E 's/.* -auth ([^ ]+).*/\1/')
+    }
+    # The emulated CPU makes all of this slow
+    check "$dm shows its greeter"           sh -c "for i in \$(seq 300); do pgrep -f -x '.*$greeter.*' > /dev/null && exit 0; sleep 2; done; exit 1"
+    sleep 30
+    greeter_x
+    echo "Greeter X: DISPLAY=$gdisplay XAUTHORITY=$gauth"
+    rm -f /var/tmp/dm-screenshot.png
+    # SDDM's Breeze greeter fades its login box out when nobody touches it
+    DISPLAY="$gdisplay" XAUTHORITY="$gauth" xdotool mousemove 20 20 mousemove 400 300
+    sleep 3
+    check "screenshot of the login screen"  env DISPLAY="$gdisplay" XAUTHORITY="$gauth" maim /var/tmp/dm-screenshot.png
+    # Log in like a person: the greeter has tester selected and the password
+    # field focused. The password from test.conf.
+    DISPLAY="$gdisplay" XAUTHORITY="$gauth" xdotool type --delay 150 'user pass 123'
+    sleep 1
+    DISPLAY="$gdisplay" XAUTHORITY="$gauth" xdotool key Return
+    check "login through the greeter: $session runs" sh -c "for i in \$(seq 300); do pgrep -u tester -x $session && exit 0; sleep 2; done; exit 1"
     # turnstile starts the user's dinit, and so PipeWire, when tester logs in
-    check "PipeWire runs for tester"        sh -c "for i in \$(seq 30); do pgrep -u tester -x pipewire && exit 0; sleep 2; done; exit 1"
-    as_tester="su tester -c"
-    run="XDG_RUNTIME_DIR=/run/user/$(id -u tester)"
+    check "PipeWire runs for tester"        sh -c "for i in \$(seq 60); do pgrep -u tester -x pipewire && exit 0; sleep 2; done; exit 1"
     sink_is_card() { $as_tester "$run wpctl inspect @DEFAULT_AUDIO_SINK@" 2> /dev/null | grep -q 'node.name = "alsa_output'; }
     # The emulated card can show up late on the slow emulated CPU
     for _ in $(seq 30); do sink_is_card && break; sleep 2; done
@@ -62,34 +104,54 @@ if [ -x /usr/local/bin/dwm ]; then
     $as_tester "$run wpctl status" 2> /dev/null | sed -n '/^Audio/,/^Video/p' | head -n 15
     loginctl list-sessions --no-legend 2> /dev/null
     ls -l /dev/snd 2> /dev/null
-    check "volume block shows the volume"   sh -c "$as_tester '$run ~/.local/bin/statusbar/sb-volume' | grep -qE '^vol [0-9]+%'"
-    check "sound-fix: HDA driver in use"    sh -c "$as_tester '$run ~/.local/bin/sound-fix status' | grep -q '^Driver: HDA'"
-    check "sound-fix: sound works"          sh -c "$as_tester '$run ~/.local/bin/sound-fix' | grep -q '^Sound works'"
-    if [ -e /etc/modprobe.d/legacy-hda.conf ]; then
-        check "sound-fix switches back and forth" sh -c "/home/tester/.local/bin/sound-fix sof && [ ! -e /etc/modprobe.d/legacy-hda.conf ] \
-            && /home/tester/.local/bin/sound-fix hda && grep -qx 'options snd-intel-dspcfg dsp_driver=1' /etc/modprobe.d/legacy-hda.conf"
-    fi
-    check "Xorg starts and stops cleanly"   sh -c "timeout 180 xinit /bin/true -- :1 vt7 -logfile /tmp/Xorg.test.log; grep -q 'Server terminated successfully' /tmp/Xorg.test.log"
-    grep -E '\((EE|WW)\)' /tmp/Xorg.test.log 2> /dev/null | head -n 5
 
-    # The DARBS session as tester, with st running htop and Thunar, for the
-    # report's screenshot. /var/tmp: the test copies it off the disk after poweroff.
-    rm -f /var/tmp/darbs-screenshot.png
-    uid=$(id -u tester)
-    XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus \
-        xinit /bin/su tester -c 'sh ~/.config/x11/xinitrc' -- :2 vt8 -logfile /tmp/Xorg.dwm.log \
-        > /tmp/dwm-session.log 2>&1 &
-    check "dwm session starts"              sh -c "for i in \$(seq 60); do pgrep -u tester -x dwm && exit 0; sleep 2; done; exit 1"
-    su tester -c 'DISPLAY=:2 st -e htop' > /dev/null 2>&1 &
-    # Thunar shows whether GTK 3 apps get the dark theme
-    su tester -c "DISPLAY=:2 XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus thunar" > /dev/null 2>&1 &
-    # Time for the wallpaper, bar and st on the slow emulated CPU
-    sleep 30
-    # Xorg logs the option as xkb_variant, not XkbVariant like in the file
-    check "X keyboard: us international"    grep -qiE 'xkb_?variant" "intl"' /tmp/Xorg.dwm.log
-    check "Thunar opens"                    sh -c "pgrep -u tester -x thunar"
-    check "screenshot of dwm"               su tester -c 'DISPLAY=:2 maim /var/tmp/darbs-screenshot.png'
-    pkill -x xinit
-    sleep 3
+    case $DESKTOP in
+        cinnamon|xfce|dwm)
+            # Xorg logs the option as xkb_variant, not XkbVariant like in the file
+            check "X keyboard: us international" grep -qiE 'xkb_?variant" "intl"' /var/log/Xorg.0.log
+            grep -E '\((EE)\)' /var/log/Xorg.0.log 2> /dev/null | head -n 5 ;;
+    esac
+    if [ "$DESKTOP" = dwm ]; then
+        check "volume block shows the volume" sh -c "$as_tester '$run ~/.local/bin/statusbar/sb-volume' | grep -qE '^vol [0-9]+%'"
+        check "sound-fix: HDA driver in use"  sh -c "$as_tester '$run ~/.local/bin/sound-fix status' | grep -q '^Driver: HDA'"
+        check "sound-fix: sound works"        sh -c "$as_tester '$run ~/.local/bin/sound-fix' | grep -q '^Sound works'"
+        if [ -e /etc/modprobe.d/legacy-hda.conf ]; then
+            check "sound-fix switches back and forth" sh -c "/home/tester/.local/bin/sound-fix sof && [ ! -e /etc/modprobe.d/legacy-hda.conf ] \
+                && /home/tester/.local/bin/sound-fix hda && grep -qx 'options snd-intel-dspcfg dsp_driver=1' /etc/modprobe.d/legacy-hda.conf"
+        fi
+    fi
+
+    # A screenshot of the session for the report. /var/tmp: the test copies
+    # it off the disk after poweroff. A few windows first, as a user would.
+    shot=/var/tmp/desktop-screenshot.png
+    rm -f $shot
+    x="DISPLAY=:0 XAUTHORITY=/home/tester/.Xauthority $run"
+    case $DESKTOP in
+        dwm)
+            $as_tester "$x st -e htop" > /dev/null 2>&1 &
+            # Thunar shows whether GTK 3 apps get the dark theme
+            $as_tester "$x thunar" > /dev/null 2>&1 &
+            sleep 30
+            check "Thunar opens"            sh -c "pgrep -u tester -x thunar"
+            check "screenshot of the desktop" su tester -c "$x maim $shot" ;;
+        cinnamon|xfce)
+            sleep 60
+            check "screenshot of the desktop" su tester -c "$x maim $shot" ;;
+        sway)
+            set -- /run/user/"$uid"/wayland-?
+            wl="$run WAYLAND_DISPLAY=$(basename "$1")"
+            set -- /run/user/"$uid"/sway-ipc.*.sock
+            wl="$wl SWAYSOCK=$1"
+            # SARBS has no htop, so a plain shell
+            $as_tester "$wl swaymsg exec foot" > /dev/null 2>&1
+            sleep 30
+            check "foot opens"              sh -c "pgrep -u tester -x foot"
+            check "screenshot of the desktop" su tester -c "$wl grim $shot" ;;
+        plasma)
+            # Plasma's first start takes long on the emulated CPU
+            sleep 90
+            wl="$run WAYLAND_DISPLAY=wayland-0"
+            check "screenshot of the desktop" sh -c "$as_tester '$wl spectacle -b -n -f -o $shot' && test -s $shot" ;;
+    esac
 fi
 echo "== BOOT CHECKS: $pass passed, $fail failed"

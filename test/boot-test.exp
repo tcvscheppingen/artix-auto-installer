@@ -104,6 +104,8 @@ expect {
 expect "READY> "
 
 # --- System checks as root ---
+# With a desktop, the checks wait for its session on the emulated CPU
+set timeout 2700
 send -- "sudo -k; sudo /usr/local/bin/boot-checks.sh\r"
 expect "password for $user"
 send -- "$pass\r"

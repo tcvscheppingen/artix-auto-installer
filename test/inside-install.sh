@@ -24,6 +24,18 @@ trap 'losetup -d "$LOOP"' EXIT
 echo "Test disk: $LOOP"
 
 sed "s|__LOOP__|$LOOP|" /src/test/test.conf > /tmp/test.conf
+# The desktop to test, and local DARBS/SARBS checkouts when mounted
+{
+    echo "DESKTOP=${DESKTOP:-none}"
+    if [[ -d /darbs ]]; then echo "DARBS_REPO=/darbs"; fi
+    if [[ -d /sarbs ]]; then echo "SARBS_REPO=/sarbs"; fi
+    # sway doesn't support NVIDIA's driver; the installer leaves it out
+    if [[ ${DESKTOP:-none} == sway ]]; then echo "SWAY_WITHOUT_NVIDIA=yes"; fi
+} >> /tmp/test.conf
+# For the verify and boot stages, also when they run on their own later
+echo "${DESKTOP:-none}" > /out/desktop.txt
+echo "${DESKTOP:-none}" > /logs/desktop.txt
+echo "Desktop: ${DESKTOP:-none}"
 start=$(date +%s)
 bash /src/artix-install.sh --config /tmp/test.conf < /dev/null 2>&1 | tee /logs/install.log
 rc=${PIPESTATUS[0]}

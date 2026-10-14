@@ -7,6 +7,9 @@ source /src/test/test.conf
 # shellcheck source-path=SCRIPTDIR source=disk.sh
 source /src/test/disk.sh
 M=/mnt
+H=$M/home/$USER_NAME
+# The desktop that inside-install.sh installed
+DESKTOP=$(cat /out/desktop.txt 2> /dev/null || echo none)
 
 open_disk
 trap close_disk EXIT
@@ -71,23 +74,106 @@ done
 check "time sync service enabled"              sh -c "ls $M/etc/dinit.d/boot.d/ | grep -q chrony"
 check "ufw ENABLED=yes"                        grep -q '^ENABLED=yes' $M/etc/ufw/ufw.conf
 check "ufw default deny incoming"              grep -q '^DEFAULT_INPUT_POLICY="DROP"' $M/etc/default/ufw
-check "yay installed"                          chroot $M pacman -Q yay
-check "go removed after yay build"             sh -c "! chroot $M pacman -Q go"
-check "no systemd installed"                   sh -c "! chroot $M pacman -Q systemd"
-check "no GTK installed"                       sh -c "! chroot $M pacman -Q gtk3"
+if [[ $ENABLE_AUR == yes ]]; then
+    check "yay installed"                      chroot $M pacman -Q yay
+    check "go removed after yay build"         sh -c "! chroot $M pacman -Q go"
+else
+    check "no yay (AUR not enabled)"           sh -c "! chroot $M pacman -Q yay"
+fi
+# By name: pacman -Q also matches what a package provides, and Artix's
+# artix-archlinux-support provides a dummy systemd (Cinnamon pulls it in)
+check "no systemd installed"                   sh -c "! chroot $M pacman -Qq | grep -qxE 'systemd|systemd-libs'"
 check "mesa not installed explicitly"          sh -c "! chroot $M pacman -Qeq mesa"
-check "nvidia-open-dkms installed"             chroot $M pacman -Q nvidia-open-dkms nvidia-utils
-check "nvidia module built for linux"          sh -c "find $M/usr/lib/modules/*-artix*/ -name 'nvidia.ko*' | grep -q ."
-check "nvidia module built for linux-lts"      sh -c "find $M/usr/lib/modules/*-lts/ -name 'nvidia.ko*' | grep -q ."
-check "no kms hook (keeps nouveau out)"        sh -c "! grep -E '^HOOKS=.* kms ' $M/etc/mkinitcpio.conf"
+if [[ $DESKTOP == sway ]]; then
+    # sway doesn't support NVIDIA's driver, so the installer leaves it out
+    check "no NVIDIA driver with sway"         sh -c "! chroot $M pacman -Q nvidia-open-dkms"
+    check "installer warned about sway + NVIDIA" grep -q "sway doesn't support NVIDIA's driver" /logs/install.log
+else
+    check "nvidia-open-dkms installed"         chroot $M pacman -Q nvidia-open-dkms nvidia-utils
+    check "nvidia module built for linux"      sh -c "find $M/usr/lib/modules/*-artix*/ -name 'nvidia.ko*' | grep -q ."
+    check "nvidia module built for linux-lts"  sh -c "find $M/usr/lib/modules/*-lts/ -name 'nvidia.ko*' | grep -q ."
+    check "no kms hook (keeps nouveau out)"    sh -c "! grep -E '^HOOKS=.* kms ' $M/etc/mkinitcpio.conf"
+    check "nouveau not in initramfs"           sh -c "! chroot $M lsinitcpio /boot/initramfs-linux.img | grep -q nouveau"
+fi
 check "older HDA driver instead of SOF"        grep -qx 'options snd-intel-dspcfg dsp_driver=1' $M/etc/modprobe.d/legacy-hda.conf
-check "nouveau not in initramfs"               sh -c "! chroot $M lsinitcpio /boot/initramfs-linux.img | grep -q nouveau"
 check "summary saved in the user's home"       test -s "$M/home/$USER_NAME/artix-install-summary.md"
 check "summary belongs to the user"            sh -c "chroot $M stat -c %U /home/$USER_NAME/artix-install-summary.md | grep -qx $USER_NAME"
 check "summary explains the sound switch"      grep -q 'sound-fix sof' "$M/home/$USER_NAME/artix-install-summary.md"
 check "install log written"                    test -s $M/var/log/artix-install/install.log
 check "install log has no LUKS passphrase"     sh -c "! grep -qF '$LUKS_PASSWORD' $M/var/log/artix-install/install.log"
 check "install log has no user password"       sh -c "! grep -qF '$USER_PASSWORD' $M/var/log/artix-install/install.log"
+
+echo "== Desktop: $DESKTOP"
+check "no rice sudoers rule left"              test ! -e $M/etc/sudoers.d/99-artix-install
+check "no DisableSandbox left in pacman.conf"  sh -c "! grep -q '^DisableSandbox' $M/etc/pacman.conf"
+if [[ $DESKTOP == none ]]; then
+    check "no GTK installed"                   sh -c "! chroot $M pacman -Q gtk3"
+    check "no display manager enabled"         sh -c "! ls $M/etc/dinit.d/boot.d/ | grep -qE '^(sddm|lightdm)$'"
+else
+    case $DESKTOP in plasma) dm=sddm ;; *) dm=lightdm ;; esac
+    check "Xorg and LibreWolf installed"       chroot $M pacman -Q xorg-server librewolf
+    for svc in dbus turnstiled bluetoothd $dm; do
+        check "system service $svc enabled"    test -L "$M/etc/dinit.d/boot.d/$svc"
+    done
+    for svc in pipewire pipewire-pulse wireplumber; do
+        check "user service $svc enabled"      test -L "$H/.config/dinit.d/boot.d/$svc"
+    done
+    check "home files owned by $USER_NAME"     sh -c "[ -z \"\$(find $H ! -uid \$(chroot $M id -u $USER_NAME) | head -1)\" ]"
+fi
+case $DESKTOP in
+    plasma)
+        check "Plasma installed"               chroot $M pacman -Q plasma-meta plasma-workspace konsole dolphin sddm-dinit
+        check "SDDM uses the Breeze theme"     grep -qx 'Current=breeze' $M/etc/sddm.conf.d/10-theme.conf
+        check "Plasma session file"            test -f $M/usr/share/wayland-sessions/plasma.desktop ;;
+    cinnamon|xfce)
+        session=$DESKTOP
+        check "$DESKTOP installed"             chroot $M pacman -Q "$([[ $DESKTOP == xfce ]] && echo xfce4-session || echo cinnamon)" lightdm-gtk-greeter lightdm-dinit
+        check "LightDM starts the $session session" grep -qx "user-session=$session" $M/etc/lightdm/lightdm.conf.d/50-artix-install.conf
+        check "$session session file"          test -f "$M/usr/share/xsessions/$session.desktop" ;;
+    dwm)
+        check "no dinit services missing"      sh -c "! grep -q 'services were not found' /logs/install.log"
+        for prog in dwm st dmenu slock dwmblocks; do
+            check "$prog built and installed"  test -x $M/usr/local/bin/$prog
+        done
+        check "dwm runs"                       sh -c "chroot $M /usr/local/bin/dwm -v 2>&1 | grep -q '^dwm-'"
+        check "st runs"                        sh -c "chroot $M /usr/local/bin/st -v 2>&1 | grep -qE 'st [0-9]'"
+        check "desktop packages installed"     chroot $M pacman -Q xorg-server xorg-xinit pipewire wireplumber dunst librewolf turnstile
+        check "xss-lock installed from [extra]" chroot $M pacman -Q xss-lock
+        check "[extra] enabled"                grep -q '^\[extra\]' $M/etc/pacman.conf
+        check "Arch keys populated"            sh -c "chroot $M pacman-key --list-keys 2>/dev/null | grep -qi archlinux"
+        for svc in dbus turnstiled bluetoothd NetworkManager lightdm; do
+            check "system service $svc enabled" test -L $M/etc/dinit.d/boot.d/$svc
+        done
+        for svc in pipewire pipewire-pulse wireplumber; do
+            check "user service $svc enabled"  test -L "$H/.config/dinit.d/boot.d/$svc"
+        done
+        check "$USER_NAME in group video"      sh -c "chroot $M id -nG $USER_NAME | grep -qw video"
+        check "dotfiles copied"                test -d "$H/.config/x11" -a -d "$H/.local/bin"
+        check "wallpaper linked"               test -L "$H/.local/share/bg"
+        check "dwm session for LightDM"        sh -c "grep -q '^Exec=/usr/local/bin/dwm-session' $M/usr/share/xsessions/dwm.desktop && test -x $M/usr/local/bin/dwm-session"
+        check "LightDM starts dwm by default"  grep -qx 'user-session=dwm' $M/etc/lightdm/lightdm.conf.d/50-gruvbox-rice.conf
+        check "minimal gruvbox greeter"        sh -c "grep -q '^background = /usr/share/backgrounds/gruvbox-rice/wallpaper.jpg' $M/etc/lightdm/lightdm-gtk-greeter.conf && test -s $M/usr/share/backgrounds/gruvbox-rice/wallpaper.jpg"
+        check "no TTY autostart (dm chosen)"   sh -c "! grep -qs 'exec startx' $H/.bash_profile"
+        check "home files owned by $USER_NAME" sh -c "[ -z \"\$(find $H ! -uid \$(chroot $M id -u $USER_NAME) | head -1)\" ]" ;;
+    sway)
+        check "no dinit services missing"      sh -c "! grep -q 'services were not found' /logs/install.log"
+        check "sway and its tools installed"   chroot $M pacman -Q sway swaybg swaylock swayidle foot waybar mako grim pipewire wireplumber librewolf turnstile
+        check "wmenu installed from [extra]"   chroot $M pacman -Q wmenu
+        check "[extra] enabled"                grep -q '^\[extra\]' $M/etc/pacman.conf
+        for svc in dbus turnstiled bluetoothd NetworkManager lightdm; do
+            check "system service $svc enabled" test -L $M/etc/dinit.d/boot.d/$svc
+        done
+        for svc in pipewire pipewire-pulse wireplumber; do
+            check "user service $svc enabled"  test -L "$H/.config/dinit.d/boot.d/$svc"
+        done
+        check "$USER_NAME in group video"      sh -c "chroot $M id -nG $USER_NAME | grep -qw video"
+        check "sway config copied"             test -f "$H/.config/sway/config"
+        check "sway session file"              test -f $M/usr/share/wayland-sessions/sway.desktop
+        check "LightDM starts sway by default" grep -qx 'user-session=sway' $M/etc/lightdm/lightdm.conf.d/50-gruvbox-rice.conf
+        check "minimal gruvbox greeter"        sh -c "grep -q '^background = /usr/share/backgrounds/gruvbox-rice/wallpaper.jpg' $M/etc/lightdm/lightdm-gtk-greeter.conf && test -s $M/usr/share/backgrounds/gruvbox-rice/wallpaper.jpg"
+        check "no TTY autostart (dm chosen)"   sh -c "! grep -qs 'exec sway' $H/.bash_profile"
+        check "home files owned by $USER_NAME" sh -c "[ -z \"\$(find $H ! -uid \$(chroot $M id -u $USER_NAME) | head -1)\" ]" ;;
+esac
 
 echo "== Result: $pass passed, $fail failed"
 } 2>&1 | tee /logs/verify.log
@@ -99,6 +185,17 @@ inittab-line = ttyS0
 GETTY
 ln -sfn /etc/dinit.d/getty@ttyS0 $M/etc/dinit.d/boot.d/getty@ttyS0
 install -m 755 /src/test/boot-checks.sh $M/usr/local/bin/boot-checks.sh
+echo "$DESKTOP" > $M/etc/artix-test-desktop
+
+# Test only: the boot test logs in through the display manager's greeter
+# with xdotool, and takes screenshots of the greeter and the desktop with
+# maim. No autologin, so the login screen itself is tested.
+rm -f $M/etc/sddm.conf.d/90-test-autologin.conf $M/etc/lightdm/lightdm.conf.d/90-test-autologin.conf
+if [[ $DESKTOP != none ]]; then
+    # artix-chroot: pacman needs /proc, /dev and resolv.conf
+    artix-chroot $M pacman -S --needed --noconfirm --disable-sandbox maim xdotool > /dev/null
+    artix-chroot $M gpgconf --homedir /etc/pacman.d/gnupg --kill all &> /dev/null || true
+fi
 
 grep -q 'failed$' /logs/verify.log && ! grep -q ' 0 failed$' /logs/verify.log && exit 1
 exit 0
