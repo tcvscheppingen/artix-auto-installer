@@ -1,6 +1,8 @@
 # Artix Auto Installer
 Personal script for installing Artix Linux with Dinit
 
+![The installer running with a config file (sped up)](assets/install-demo.gif)
+
 After having installed Aritx/Arch manually multiple times, I wanted to automate the installation, so I created this script.  
 The default locale and keymap are my own preferences, but can be changed during the installation.
 
