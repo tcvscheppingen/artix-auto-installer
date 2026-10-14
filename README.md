@@ -26,15 +26,24 @@ The script will do the following:
 
 The script can install one of these:
 
-| Desktop | Login screen | What you get | Screenshot |
-|---|---|---|---|
-| KDE Plasma | yes (SDDM) | A complete, modern desktop, with KDE's terminal, file manager, text editor, archive manager, image and document viewers and screenshot tool | [<img src="assets/desktops/plasma.jpg" width="320" alt="KDE Plasma with its Welcome Center">](assets/desktops/plasma.jpg) |
-| Cinnamon | yes (LightDM) | A traditional desktop, like Linux Mint's, with a terminal, archive manager, image viewer and sound and Bluetooth settings | [<img src="assets/desktops/cinnamon.jpg" width="320" alt="The Cinnamon desktop">](assets/desktops/cinnamon.jpg) |
-| XFCE | yes (LightDM) | A light, traditional desktop, with its extra apps and sound, network and Bluetooth settings | [<img src="assets/desktops/xfce.jpg" width="320" alt="The XFCE desktop">](assets/desktops/xfce.jpg) |
-| sway | your choice | My keyboard-driven [sway setup](https://github.com/tcvscheppingen/SARBS) (SARBS) | [<img src="assets/desktops/sway.jpg" width="320" alt="sway with a terminal, from SARBS">](assets/desktops/sway.jpg) |
-| dwm | your choice | My keyboard-driven [dwm setup](https://github.com/tcvscheppingen/DARBS) (DARBS) | [<img src="assets/desktops/dwm.jpg" width="320" alt="dwm with the Thunar file manager and htop, from DARBS">](assets/desktops/dwm.jpg) |
+| Desktop | Login screen | What you get |
+|---|---|---|
+| KDE Plasma | yes (SDDM) | A complete, modern desktop, with KDE's terminal, file manager, text editor, archive manager, image and document viewers and screenshot tool |
+| Cinnamon | yes (LightDM) | A traditional desktop, like Linux Mint's, with a terminal, archive manager, image viewer and sound and Bluetooth settings |
+| XFCE | yes (LightDM) | A light, traditional desktop, with its extra apps and sound, network and Bluetooth settings |
+| sway | your choice | My keyboard-driven [sway setup](https://github.com/tcvscheppingen/SARBS) (SARBS) |
+| dwm | your choice | My keyboard-driven [dwm setup](https://github.com/tcvscheppingen/DARBS) (DARBS) |
 
-The screenshots are from the automated tests, right after logging in.
+<p align="center">
+  <a href="assets/desktops/plasma.jpg"><img src="assets/desktops/plasma.jpg" width="250" alt="KDE Plasma with its Welcome Center"></a>
+  <a href="assets/desktops/cinnamon.jpg"><img src="assets/desktops/cinnamon.jpg" width="250" alt="The Cinnamon desktop"></a>
+  <a href="assets/desktops/xfce.jpg"><img src="assets/desktops/xfce.jpg" width="250" alt="The XFCE desktop"></a>
+  <br>
+  <a href="assets/desktops/sway.jpg"><img src="assets/desktops/sway.jpg" width="250" alt="sway with a terminal, from SARBS"></a>
+  <a href="assets/desktops/dwm.jpg"><img src="assets/desktops/dwm.jpg" width="250" alt="dwm with the Thunar file manager and htop, from DARBS"></a>
+  <br>
+  <sub>KDE Plasma, Cinnamon and XFCE; sway and dwm. From the automated tests, right after logging in.</sub>
+</p>
 
 KDE Plasma, Cinnamon and XFCE also come with the LibreWolf web browser, Bluetooth, fonts for most languages and emoji, and the graphics drivers for Intel and AMD graphics. Sound and the network work right away with every desktop.
 
