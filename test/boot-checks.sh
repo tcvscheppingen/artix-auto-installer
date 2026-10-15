@@ -122,17 +122,29 @@ if [ "$DESKTOP" != none ]; then
     fi
 
     # A screenshot of the session for the report. /var/tmp: the test copies
-    # it off the disk after poweroff. A few windows first, as a user would.
+    # it off the disk after poweroff. dwm and sway: one floating terminal
+    # with fastfetch in the middle of the screen, the way the rice looks.
     shot=/var/tmp/desktop-screenshot.png
     rm -f $shot
     x="DISPLAY=:0 XAUTHORITY=/home/tester/.Xauthority $run"
     case $DESKTOP in
         dwm)
-            $as_tester "$x st -e htop" > /dev/null 2>&1 &
-            # Thunar shows whether GTK 3 apps get the dark theme
-            $as_tester "$x thunar" > /dev/null 2>&1 &
-            sleep 30
-            check "Thunar opens"            sh -c "pgrep -u tester -x thunar"
+            $as_tester "$x st" > /dev/null 2>&1 &
+            sleep 20
+            check "st opens"                sh -c "pgrep -u tester -x st"
+            # mod+shift+space floats the new terminal; dwm keeps its tiled
+            # size, so shrink it and center it on the screen, then run
+            # fastfetch at that size
+            $as_tester "$x xdotool key super+shift+space" > /dev/null 2>&1
+            sleep 2
+            read -r sw sh < <($as_tester "$x xdotool getdisplaygeometry")
+            $as_tester "$x xdotool getactivewindow windowsize 860 500 windowmove $(((sw - 860) / 2)) $(((sh - 500) / 2))" > /dev/null 2>&1
+            # The pointer is still where the greeter login left it
+            $as_tester "$x xdotool mousemove $sw $sh" > /dev/null 2>&1
+            sleep 2
+            $as_tester "$x xdotool type --delay 30 'clear; fastfetch'" > /dev/null 2>&1
+            $as_tester "$x xdotool key Return" > /dev/null 2>&1
+            sleep 10
             check "screenshot of the desktop" su tester -c "$x maim $shot" ;;
         cinnamon|xfce)
             sleep 60
@@ -142,8 +154,11 @@ if [ "$DESKTOP" != none ]; then
             wl="$run WAYLAND_DISPLAY=$(basename "$1")"
             set -- /run/user/"$uid"/sway-ipc.*.sock
             wl="$wl SWAYSOCK=$1"
-            # SARBS has no htop, so a plain shell
-            $as_tester "$wl swaymsg exec foot" > /dev/null 2>&1
+            # Hide the pointer after 1 s without moving: grim would show it
+            $as_tester "$wl swaymsg 'seat * hide_cursor 1000'" > /dev/null 2>&1
+            # foot asks for this size, and sway keeps it for a floating window
+            $as_tester "$wl swaymsg 'for_window [app_id=fastfetch] floating enable, move position center'" > /dev/null 2>&1
+            $as_tester "$wl swaymsg exec \"foot --app-id=fastfetch --window-size-pixels=860x500 sh -c 'fastfetch; exec \\\$SHELL'\"" > /dev/null 2>&1
             sleep 30
             check "foot opens"              sh -c "pgrep -u tester -x foot"
             check "screenshot of the desktop" su tester -c "$wl grim $shot" ;;

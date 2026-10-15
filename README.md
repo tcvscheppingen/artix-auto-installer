@@ -39,10 +39,10 @@ The script can install one of these:
   <a href="assets/desktops/cinnamon.jpg"><img src="assets/desktops/cinnamon.jpg" width="250" alt="The Cinnamon desktop"></a>
   <a href="assets/desktops/xfce.jpg"><img src="assets/desktops/xfce.jpg" width="250" alt="The XFCE desktop"></a>
   <br>
-  <a href="assets/desktops/sway.jpg"><img src="assets/desktops/sway.jpg" width="250" alt="sway with a terminal, from SARBS"></a>
-  <a href="assets/desktops/dwm.jpg"><img src="assets/desktops/dwm.jpg" width="250" alt="dwm with the Thunar file manager and htop, from DARBS"></a>
+  <a href="assets/desktops/sway.jpg"><img src="assets/desktops/sway.jpg" width="250" alt="sway with a floating terminal running fastfetch, from SARBS"></a>
+  <a href="assets/desktops/dwm.jpg"><img src="assets/desktops/dwm.jpg" width="250" alt="dwm with a floating terminal running fastfetch, from DARBS"></a>
   <br>
-  <sub>KDE Plasma, Cinnamon and XFCE; sway and dwm. From the automated tests, right after logging in.</sub>
+  <sub>KDE Plasma, Cinnamon and XFCE; sway and dwm.</sub>
 </p>
 
 KDE Plasma, Cinnamon and XFCE also come with the LibreWolf web browser, Bluetooth, fonts for most languages and emoji, and the graphics drivers for Intel and AMD graphics. Sound and the network work right away with every desktop.

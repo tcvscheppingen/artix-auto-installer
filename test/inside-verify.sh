@@ -193,7 +193,9 @@ echo "$DESKTOP" > $M/etc/artix-test-desktop
 rm -f $M/etc/sddm.conf.d/90-test-autologin.conf $M/etc/lightdm/lightdm.conf.d/90-test-autologin.conf
 if [[ $DESKTOP != none ]]; then
     # artix-chroot: pacman needs /proc, /dev and resolv.conf
-    artix-chroot $M pacman -S --needed --noconfirm --disable-sandbox maim xdotool > /dev/null
+    # fastfetch: the dwm and sway screenshots show it in a floating terminal
+    extra=(); [[ $DESKTOP == dwm || $DESKTOP == sway ]] && extra=(fastfetch)
+    artix-chroot $M pacman -S --needed --noconfirm --disable-sandbox maim xdotool "${extra[@]}" > /dev/null
     artix-chroot $M gpgconf --homedir /etc/pacman.d/gnupg --kill all &> /dev/null || true
 fi
 
