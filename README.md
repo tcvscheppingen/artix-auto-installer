@@ -31,7 +31,7 @@ The script can install one of these:
 | KDE Plasma | yes (SDDM) | A complete, modern desktop, with KDE's terminal, file manager, text editor, archive manager, image and document viewers and screenshot tool |
 | Cinnamon | yes (LightDM) | A traditional desktop, like Linux Mint's, with a terminal, archive manager, image viewer and sound and Bluetooth settings |
 | XFCE | yes (LightDM) | A light, traditional desktop, with its extra apps and sound, network and Bluetooth settings |
-| LXQt | yes (LightDM) | The lightest of these desktops, for older or slower computers, with a terminal, file manager, archive manager, image viewer, screenshot tool and sound, network and Bluetooth settings |
+| LXQt | yes (LightDM) | A light, traditional desktop like XFCE, built with Qt, with a terminal, file manager, archive manager, image viewer, screenshot tool and sound, network and Bluetooth settings |
 | sway | your choice | My keyboard-driven [sway setup](https://github.com/tcvscheppingen/SARBS) (SARBS) |
 | dwm | your choice | My keyboard-driven [dwm setup](https://github.com/tcvscheppingen/DARBS) (DARBS) |
 
@@ -49,7 +49,7 @@ The script can install one of these:
 
 KDE Plasma, Cinnamon, XFCE and LXQt also come with the LibreWolf web browser, Bluetooth, fonts for most languages and emoji, and the graphics drivers for Intel and AMD graphics. Sound and the network work right away with every desktop.
 
-sway and dwm are window managers: you control the windows mostly with the keyboard. The script installs them with my own settings and look. They can start right after you log in on the text screen, or from a simple login screen in the same gruvbox colors; the script asks which you prefer.
+sway and dwm are window managers: you control the windows mostly with the keyboard. They need less memory and processor power than any of the desktops, which makes them the lightest choice, but they take some learning. The script installs them with my own settings and look. They can start right after you log in on the text screen, or from a simple login screen in the same gruvbox colors; the script asks which you prefer.
 
 A few limits:
 - sway doesn't work with NVIDIA's own driver. With sway, the script leaves that driver out and uses the open nouveau driver instead; on a laptop that also has Intel or AMD graphics, sway uses those.
