@@ -31,6 +31,7 @@ The script can install one of these:
 | KDE Plasma | yes (SDDM) | A complete, modern desktop, with KDE's terminal, file manager, text editor, archive manager, image and document viewers and screenshot tool |
 | Cinnamon | yes (LightDM) | A traditional desktop, like Linux Mint's, with a terminal, archive manager, image viewer and sound and Bluetooth settings |
 | XFCE | yes (LightDM) | A light, traditional desktop, with its extra apps and sound, network and Bluetooth settings |
+| LXQt | yes (LightDM) | The lightest of these desktops, for older or slower computers, with a terminal, file manager, archive manager, image viewer, screenshot tool and sound, network and Bluetooth settings |
 | sway | your choice | My keyboard-driven [sway setup](https://github.com/tcvscheppingen/SARBS) (SARBS) |
 | dwm | your choice | My keyboard-driven [dwm setup](https://github.com/tcvscheppingen/DARBS) (DARBS) |
 
@@ -39,19 +40,21 @@ The script can install one of these:
   <a href="assets/desktops/cinnamon.jpg"><img src="assets/desktops/cinnamon.jpg" width="250" alt="The Cinnamon desktop"></a>
   <a href="assets/desktops/xfce.jpg"><img src="assets/desktops/xfce.jpg" width="250" alt="The XFCE desktop"></a>
   <br>
+  <a href="assets/desktops/lxqt.jpg"><img src="assets/desktops/lxqt.jpg" width="250" alt="The LXQt desktop"></a>
   <a href="assets/desktops/sway.jpg"><img src="assets/desktops/sway.jpg" width="250" alt="sway with a floating terminal running fastfetch, from SARBS"></a>
   <a href="assets/desktops/dwm.jpg"><img src="assets/desktops/dwm.jpg" width="250" alt="dwm with a floating terminal running fastfetch, from DARBS"></a>
   <br>
-  <sub>KDE Plasma, Cinnamon and XFCE; sway and dwm.</sub>
+  <sub>KDE Plasma, Cinnamon and XFCE; LXQt, sway and dwm.</sub>
 </p>
 
-KDE Plasma, Cinnamon and XFCE also come with the LibreWolf web browser, Bluetooth, fonts for most languages and emoji, and the graphics drivers for Intel and AMD graphics. Sound and the network work right away with every desktop.
+KDE Plasma, Cinnamon, XFCE and LXQt also come with the LibreWolf web browser, Bluetooth, fonts for most languages and emoji, and the graphics drivers for Intel and AMD graphics. Sound and the network work right away with every desktop.
 
 sway and dwm are window managers: you control the windows mostly with the keyboard. The script installs them with my own settings and look. They can start right after you log in on the text screen, or from a simple login screen in the same gruvbox colors; the script asks which you prefer.
 
 A few limits:
 - sway doesn't work with NVIDIA's own driver. With sway, the script leaves that driver out and uses the open nouveau driver instead; on a laptop that also has Intel or AMD graphics, sway uses those.
 - GNOME is not offered, because it needs systemd, which Artix doesn't use.
+- LXDE is not offered: it is no longer developed, and its developers now work on LXQt, its successor.
 
 ## Usage
 
@@ -79,14 +82,14 @@ This part is for people working on the script. `test/run-container-test.sh` test
 
 ```bash
 test/run-container-test.sh                          # shellcheck, packages, install, verify, boot; no desktop
-test/run-container-test.sh all --desktop plasma     # with a desktop: plasma, cinnamon, xfce, sway or dwm
+test/run-container-test.sh all --desktop plasma     # with a desktop: plasma, cinnamon, xfce, lxqt, sway or dwm
 test/run-container-test.sh all --desktop all        # every desktop in turn (takes hours)
 test/run-container-test.sh report --desktop all     # write the reports again from the saved results
 DARBS_DIR=~/src/DARBS test/run-container-test.sh all --desktop dwm    # a local DARBS checkout
 SARBS_DIR=~/src/SARBS test/run-container-test.sh all --desktop sway   # a local SARBS checkout
 ```
 
-Every run checks that the package lists of Plasma, Cinnamon and XFCE still exist in the Artix repos. Each desktop needs its own install, so `--desktop all` installs, checks and boots them one after another; a failing desktop doesn't stop the next one. With a desktop, the boot test logs in through the login screen the way a person would (it types the password with xdotool), checks the session, PipeWire and the sound card, and the report shows screenshots of the login screen and the desktop.
+Every run checks that the package lists of Plasma, Cinnamon, XFCE and LXQt still exist in the Artix repos. Each desktop needs its own install, so `--desktop all` installs, checks and boots them one after another; a failing desktop doesn't stop the next one. With a desktop, the boot test logs in through the login screen the way a person would (it types the password with xdotool), checks the session, PipeWire and the sound card, and the report shows screenshots of the login screen and the desktop.
 
 It works on macOS (Docker Desktop) and Linux (Docker Engine). The install and check stages need privileged containers, which on Linux share the host's kernel; the test only uses its own loop devices and device-mapper names, and doesn't change the host's EFI boot entries, clock, swap or console keymap.
 

@@ -49,6 +49,7 @@ if [ "$DESKTOP" != none ]; then
         plasma)   dm=sddm;    session=plasmashell ;;
         cinnamon) dm=lightdm; session=cinnamon ;;
         xfce)     dm=lightdm; session=xfce4-session ;;
+        lxqt)     dm=lightdm; session=lxqt-session ;;
         sway)     dm=lightdm; session=sway ;;
         dwm)      dm=lightdm; session=dwm ;;
     esac
@@ -106,7 +107,7 @@ if [ "$DESKTOP" != none ]; then
     ls -l /dev/snd 2> /dev/null
 
     case $DESKTOP in
-        cinnamon|xfce|dwm)
+        cinnamon|xfce|lxqt|dwm)
             # Xorg logs the option as xkb_variant, not XkbVariant like in the file
             check "X keyboard: us international" grep -qiE 'xkb_?variant" "intl"' /var/log/Xorg.0.log
             grep -E '\((EE)\)' /var/log/Xorg.0.log 2> /dev/null | head -n 5 ;;
@@ -146,7 +147,7 @@ if [ "$DESKTOP" != none ]; then
             $as_tester "$x xdotool key Return" > /dev/null 2>&1
             sleep 10
             check "screenshot of the desktop" su tester -c "$x maim $shot" ;;
-        cinnamon|xfce)
+        cinnamon|xfce|lxqt)
             sleep 60
             check "screenshot of the desktop" su tester -c "$x maim $shot" ;;
         sway)

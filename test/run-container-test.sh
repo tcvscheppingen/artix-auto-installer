@@ -22,7 +22,7 @@
 # so `report` writes the reports again, e.g. after rerunning one desktop.
 #
 # Usage: ./run-container-test.sh [shellcheck|packages|install|verify|boot|all|report] [--desktop NAME]
-#   --desktop NAME   none (default), plasma, cinnamon, xfce, sway, dwm, or
+#   --desktop NAME   none (default), plasma, cinnamon, xfce, lxqt, sway, dwm or
 #                    all: each of them in turn (hours: every one installs again)
 #   --darbs          the same as --desktop dwm
 #   DARBS_DIR=~/src/DARBS SARBS_DIR=~/src/SARBS ./run-container-test.sh all --desktop sway
@@ -31,8 +31,8 @@
 set -Eeuo pipefail
 cd "$(dirname "$0")"
 
-ALL_DESKTOPS=(none plasma cinnamon xfce sway dwm)
-usage() { echo "Usage: $0 [shellcheck|packages|install|verify|boot|all|report] [--desktop none|plasma|cinnamon|xfce|sway|dwm|all]" >&2; exit 1; }
+ALL_DESKTOPS=(none plasma cinnamon xfce lxqt sway dwm)
+usage() { echo "Usage: $0 [shellcheck|packages|install|verify|boot|all|report] [--desktop none|plasma|cinnamon|xfce|lxqt|sway|dwm|all]" >&2; exit 1; }
 STAGE=all
 DESKTOP_ARG=none
 while (( $# )); do
@@ -46,7 +46,7 @@ while (( $# )); do
 done
 case $DESKTOP_ARG in
     all) DESKTOPS=("${ALL_DESKTOPS[@]}") ;;
-    none|plasma|cinnamon|xfce|sway|dwm) DESKTOPS=("$DESKTOP_ARG") ;;
+    none|plasma|cinnamon|xfce|lxqt|sway|dwm) DESKTOPS=("$DESKTOP_ARG") ;;
     *) usage ;;
 esac
 GLOBAL_STAGES=() DESKTOP_STAGES=()

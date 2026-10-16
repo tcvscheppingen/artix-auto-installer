@@ -125,9 +125,10 @@ case $DESKTOP in
         check "Plasma installed"               chroot $M pacman -Q plasma-meta plasma-workspace konsole dolphin sddm-dinit
         check "SDDM uses the Breeze theme"     grep -qx 'Current=breeze' $M/etc/sddm.conf.d/10-theme.conf
         check "Plasma session file"            test -f $M/usr/share/wayland-sessions/plasma.desktop ;;
-    cinnamon|xfce)
+    cinnamon|xfce|lxqt)
         session=$DESKTOP
-        check "$DESKTOP installed"             chroot $M pacman -Q "$([[ $DESKTOP == xfce ]] && echo xfce4-session || echo cinnamon)" lightdm-gtk-greeter lightdm-dinit
+        case $DESKTOP in xfce) pkg=xfce4-session ;; lxqt) pkg=lxqt-session ;; *) pkg=cinnamon ;; esac
+        check "$DESKTOP installed"             chroot $M pacman -Q "$pkg" lightdm-gtk-greeter lightdm-dinit
         check "LightDM starts the $session session" grep -qx "user-session=$session" $M/etc/lightdm/lightdm.conf.d/50-artix-install.conf
         check "$session session file"          test -f "$M/usr/share/xsessions/$session.desktop" ;;
     dwm)

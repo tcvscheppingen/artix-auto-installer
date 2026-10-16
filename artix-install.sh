@@ -7,7 +7,7 @@
 #   * LUKS2 encrypted root (ext4); the initramfs asks for the passphrase
 #   * GRUB, NetworkManager, chrony, ufw firewall (deny incoming)
 #   * optional: linux-lts fallback kernel, NVIDIA driver, yay (AUR)
-#   * optional desktop: KDE Plasma, Cinnamon or XFCE, or sway
+#   * optional desktop: KDE Plasma, Cinnamon, XFCE or LXQt, or sway
 #     (https://github.com/tcvscheppingen/SARBS) or dwm
 #     (https://github.com/tcvscheppingen/DARBS); without one it boots to a TTY
 #
@@ -17,7 +17,7 @@
 # Usage:
 #   ./artix-install.sh                  # interactive
 #   ./artix-install.sh --config FILE    # preset answers (see install.conf.example)
-#   ./artix-install.sh --print-desktop-packages plasma|cinnamon|xfce
+#   ./artix-install.sh --print-desktop-packages plasma|cinnamon|xfce|lxqt
 #                                       # the packages of a desktop environment
 #
 # Every variable listed in install.conf.example can also be set in the
@@ -314,6 +314,10 @@ desktop_packages() {
                       pavucontrol blueman lightdm lightdm-dinit lightdm-gtk-greeter ;;
         xfce)     printf '%s\n' "${common[@]}" xfce4 xfce4-goodies gnome-keyring pavucontrol network-manager-applet \
                       blueman lightdm lightdm-dinit lightdm-gtk-greeter ;;
+        # The lxqt group has openbox and pavucontrol-qt; LXQt needs an icon
+        # theme of its own, and xscreensaver to lock the screen
+        lxqt)     printf '%s\n' "${common[@]}" lxqt breeze-icons xscreensaver gnome-keyring network-manager-applet \
+                      blueman lightdm lightdm-dinit lightdm-gtk-greeter ;;
         *)        return 1 ;;
     esac
 }
@@ -324,6 +328,7 @@ desktop_label() {
         plasma)   echo "KDE Plasma, SDDM login screen" ;;
         cinnamon) echo "Cinnamon, LightDM login screen" ;;
         xfce)     echo "XFCE, LightDM login screen" ;;
+        lxqt)     echo "LXQt, LightDM login screen" ;;
         sway|dwm)
             case $DESKTOP_LOGIN in
                 tty)  echo "$1 ($([[ $1 == sway ]] && echo SARBS || echo DARBS)), starts on TTY1 login" ;;
@@ -333,7 +338,7 @@ desktop_label() {
     esac
 }
 
-# KDE Plasma, Cinnamon or XFCE, with their display manager
+# KDE Plasma, Cinnamon, XFCE or LXQt, with their display manager
 install_desktop_environment() {
     local pkgs dm svc dir
     mapfile -t pkgs < <(desktop_packages "$DESKTOP")
@@ -442,7 +447,7 @@ while (( $# )); do
     case $1 in
         -c|--config) CONFIG_FILE=${2-}; shift 2 ;;
         --print-desktop-packages)
-            desktop_packages "${2-}" || die "Desktop environments: plasma, cinnamon, xfce"
+            desktop_packages "${2-}" || die "Desktop environments: plasma, cinnamon, xfce, lxqt"
             exit 0 ;;
         -h|--help)   usage ;;
         *)           die "Unknown option: $1 (see --help)" ;;
@@ -713,6 +718,7 @@ while :; do
         "plasma:KDE Plasma (SDDM login screen)" \
         "cinnamon:Cinnamon (LightDM login screen)" \
         "xfce:XFCE (LightDM login screen)" \
+        "lxqt:LXQt (LightDM login screen)" \
         "sway:sway, my Wayland setup (SARBS)" \
         "dwm:dwm, my X11 setup (DARBS)"
     [[ $DESKTOP == sway && $INSTALL_NVIDIA == yes ]] || break
@@ -1059,7 +1065,7 @@ fi
 # --- 9. Optional: desktop ---
 
 case $DESKTOP in
-    plasma|cinnamon|xfce)
+    plasma|cinnamon|xfce|lxqt)
         step "Installing $(desktop_label "$DESKTOP") (this takes a while)"
         install_desktop_environment ;;
     sway|dwm)
@@ -1099,7 +1105,7 @@ case $DESKTOP in
     none)
         login_step="Log in as $USER_NAME. Connect to Wi-Fi with \`nmtui\`."
         desktop_step=$'\n'"4. Install a desktop, for example DARBS: $DARBS_URL or SARBS: $SARBS_URL" ;;
-    plasma|cinnamon|xfce)
+    plasma|cinnamon|xfce|lxqt)
         login_step="Log in as $USER_NAME on the login screen. Connect to Wi-Fi with the network icon in the panel."
         desktop_step="" ;;
     sway|dwm)

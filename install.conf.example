@@ -17,7 +17,7 @@
 #INSTALL_NVIDIA=             # yes/no, only asked when an NVIDIA GPU is found
 #AUDIO_LEGACY_HDA=           # yes = older HDA sound driver instead of SOF (asked for Intel audio with a DSP)
 #ENABLE_AUR=no               # yes = build and install yay
-#DESKTOP=none                # none, plasma, cinnamon, xfce, sway (SARBS) or dwm (DARBS)
+#DESKTOP=none                # none, plasma, cinnamon, xfce, lxqt, sway (SARBS) or dwm (DARBS)
 #DESKTOP_LOGIN=dm            # sway/dwm only: tty (start on TTY1 login), dm (LightDM login screen) or none
 #SWAY_WITHOUT_NVIDIA=        # sway with an NVIDIA GPU: yes = skip NVIDIA's driver (sway doesn't support it), empty = ask
 #CONFIRM_WIPE=no             # yes = don't ask to type ERASE
