@@ -20,6 +20,7 @@
 # install for every desktop). A run with sway installs without NVIDIA's
 # driver (sway doesn't support it), so one base system suits every desktop;
 # --nvidia keeps the driver, and sway then gets a whole install of its own.
+# The base systems with and without NVIDIA's driver are kept side by side.
 # Downloaded packages are kept in the Docker volume artix-install-pkgcache.
 #
 # Stages 3-5 run once per desktop. Their logs, screenshots and report go to
@@ -118,9 +119,11 @@ boot_vm() {
 base_key() {
     echo "$(cat ../artix-install.sh test.conf inside-install.sh disk.sh | shasum | cut -c1-16) nvidia=$TEST_NVIDIA"
 }
+# One base system with NVIDIA's driver and one without, see inside-install.sh
 base_is_current() {
-    docker run --rm --platform linux/amd64 -e "KEY=$(base_key)" -v "$VOLUME:/out" artix-live-sim \
-        sh -c '[ "$(cat /out/base.key 2> /dev/null)" = "$KEY" ] && [ -n "$(find /out/base.img -mmin -1440 2> /dev/null)" ]'
+    docker run --rm --platform linux/amd64 -e "KEY=$(base_key)" -e "BASE=/out/base-nvidia-$TEST_NVIDIA" \
+        -v "$VOLUME:/out" artix-live-sim \
+        sh -c '[ "$(cat "$BASE.key" 2> /dev/null)" = "$KEY" ] && [ -n "$(find "$BASE.img" -mmin -1440 2> /dev/null)" ]'
 }
 
 # The desktop on the test disk, which inside-install.sh notes there

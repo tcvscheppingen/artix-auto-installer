@@ -156,8 +156,8 @@ case $DESKTOP in
         check "dotfiles copied"                test -d "$H/.config/x11" -a -d "$H/.local/bin"
         check "wallpaper linked"               test -L "$H/.local/share/bg"
         check "dwm session for LightDM"        sh -c "grep -q '^Exec=/usr/local/bin/dwm-session' $M/usr/share/xsessions/dwm.desktop && test -x $M/usr/local/bin/dwm-session"
-        check "LightDM starts dwm by default"  grep -qx 'user-session=dwm' $M/etc/lightdm/lightdm.conf.d/50-gruvbox-rice.conf
-        check "minimal gruvbox greeter"        sh -c "grep -q '^background = /usr/share/backgrounds/gruvbox-rice/wallpaper.jpg' $M/etc/lightdm/lightdm-gtk-greeter.conf && test -s $M/usr/share/backgrounds/gruvbox-rice/wallpaper.jpg"
+        check "LightDM starts dwm by default"  grep -qx 'user-session=dwm' $M/etc/lightdm/lightdm.conf.d/50-darbs.conf
+        check "minimal greeter, DARBS wallpaper" sh -c "grep -q '^background = /usr/share/backgrounds/darbs/wallpaper.jpg' $M/etc/lightdm/lightdm-gtk-greeter.conf && test -s $M/usr/share/backgrounds/darbs/wallpaper.jpg"
         check "no TTY autostart (dm chosen)"   sh -c "! grep -qs 'exec startx' $H/.bash_profile"
         check "home files owned by $USER_NAME" sh -c "[ -z \"\$(find $H ! -uid \$(chroot $M id -u $USER_NAME) | head -1)\" ]" ;;
     sway)

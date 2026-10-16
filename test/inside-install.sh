@@ -28,12 +28,13 @@ start=$(date +%s)
 rc=0
 bash /src/artix-install.sh --config /tmp/test.conf < /dev/null 2>&1 | tee /logs/install.log || rc=$?
 echo "Installer exit code: $rc, took $(( $(date +%s) - start ))s" | tee -a /logs/install.log
-# Without a desktop, this is the base system the desktop tests start from
+# Without a desktop, this is the base system the desktop tests start from:
+# one with NVIDIA's driver and one without (runs with sway)
 if [[ $rc == 0 && ${DESKTOP:-none} == none && -n ${BASE_KEY-} ]]; then
-    rm -f /out/base.key
-    cp --sparse=always "$IMG" /out/base.img
-    cp /out/nvidia.txt /out/base.nvidia
-    echo "$BASE_KEY" > /out/base.key
-    echo "Saved the base system for the desktop tests"
+    base=/out/base-nvidia-${TEST_NVIDIA:-yes}
+    rm -f "$base.key" /out/base.img /out/base.key /out/base.nvidia   # also the single base of before
+    cp --sparse=always "$IMG" "$base.img"
+    echo "$BASE_KEY" > "$base.key"
+    echo "Saved the base system for the desktop tests ($base.img)"
 fi
 exit "$rc"

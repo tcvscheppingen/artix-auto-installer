@@ -11,11 +11,13 @@ prepare_dev
 umount -R /mnt 2> /dev/null || true
 release_test_disk
 
-[[ -s /out/base.img ]] || { echo "No base system in /out/base.img" >&2; exit 1; }
-cp --sparse=always /out/base.img /out/disk.img
+# With or without NVIDIA's driver, see inside-install.sh
+base=/out/base-nvidia-${TEST_NVIDIA:-yes}.img
+[[ -s $base ]] || { echo "No base system in $base" >&2; exit 1; }
+cp --sparse=always "$base" /out/disk.img
 echo "$DESKTOP" > /out/desktop.txt
 echo "$DESKTOP" > /logs/desktop.txt
-cp /out/base.nvidia /out/nvidia.txt 2> /dev/null || true
+echo "${TEST_NVIDIA:-yes}" > /out/nvidia.txt
 
 M=/mnt
 # open_disk needs LUKS_PASSWORD
