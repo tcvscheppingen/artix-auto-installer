@@ -8,8 +8,10 @@ source /src/test/test.conf
 source /src/test/disk.sh
 M=/mnt
 H=$M/home/$USER_NAME
-# The desktop that inside-install.sh installed
+# The desktop that inside-install.sh installed, and whether with NVIDIA's
+# driver (no when the run includes sway, see run-container-test.sh)
 DESKTOP=$(cat /out/desktop.txt 2> /dev/null || echo none)
+NVIDIA=$(cat /out/nvidia.txt 2> /dev/null || echo yes)
 
 open_disk
 trap close_disk EXIT
@@ -84,7 +86,9 @@ fi
 # artix-archlinux-support provides a dummy systemd (Cinnamon pulls it in)
 check "no systemd installed"                   sh -c "! chroot $M pacman -Qq | grep -qxE 'systemd|systemd-libs'"
 check "mesa not installed explicitly"          sh -c "! chroot $M pacman -Qeq mesa"
-if [[ $DESKTOP == sway ]]; then
+if [[ $NVIDIA == no ]]; then
+    check "no NVIDIA driver (none in this run)" sh -c "! chroot $M pacman -Q nvidia-open-dkms"
+elif [[ $DESKTOP == sway ]]; then
     # sway doesn't support NVIDIA's driver, so the installer leaves it out
     check "no NVIDIA driver with sway"         sh -c "! chroot $M pacman -Q nvidia-open-dkms"
     check "installer warned about sway + NVIDIA" grep -q "sway doesn't support NVIDIA's driver" /logs/install.log

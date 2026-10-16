@@ -55,6 +55,7 @@ A few limits:
 - sway doesn't work with NVIDIA's own driver. With sway, the script leaves that driver out and uses the open nouveau driver instead; on a laptop that also has Intel or AMD graphics, sway uses those.
 - GNOME is not offered, because it needs systemd, which Artix doesn't use.
 - LXDE is not offered: it is no longer developed, and its developers now work on LXQt, its successor.
+- The boot partition (`/boot`, with the Linux kernel and the boot menu) is not encrypted, and Secure Boot is off. The encryption protects your files when the computer is lost or stolen, but not against someone who changes the boot partition while you're away and then waits for you to type the disk password.
 
 ## Usage
 
@@ -65,12 +66,14 @@ A few limits:
 5. Run these commands:
 
 ```bash
-pacman -S git
+pacman -Sy git
 git clone https://github.com/tcvscheppingen/artix-auto-installer.git
 cd artix-auto-installer
 chmod +x artix-install.sh
 ./artix-install.sh
 ```
+
+Don't update the live system with `pacman -Syu` first. That replaces its Linux kernel package, so the running kernel can no longer load the modules that the disk encryption needs, and the script stops before changing the disk. If you did, restart the computer from the USB stick and start again; the installed system gets the latest packages anyway.
 
 The script erases the whole disk you choose; it asks you to type `ERASE` before it changes anything.
 
@@ -85,11 +88,15 @@ test/run-container-test.sh                          # shellcheck, packages, inst
 test/run-container-test.sh all --desktop plasma     # with a desktop: plasma, cinnamon, xfce, lxqt, sway or dwm
 test/run-container-test.sh all --desktop all        # every desktop in turn (takes hours)
 test/run-container-test.sh report --desktop all     # write the reports again from the saved results
+test/run-container-test.sh all --desktop all --full # a whole install for every desktop
+test/run-container-test.sh all --desktop sway --nvidia  # keep NVIDIA's driver in a run with sway
 DARBS_DIR=~/src/DARBS test/run-container-test.sh all --desktop dwm    # a local DARBS checkout
 SARBS_DIR=~/src/SARBS test/run-container-test.sh all --desktop sway   # a local SARBS checkout
 ```
 
-Every run checks that the package lists of Plasma, Cinnamon, XFCE and LXQt still exist in the Artix repos. Each desktop needs its own install, so `--desktop all` installs, checks and boots them one after another; a failing desktop doesn't stop the next one. With a desktop, the boot test logs in through the login screen the way a person would (it types the password with xdotool), checks the session, PipeWire and the sound card, and the report shows screenshots of the login screen and the desktop.
+Every run checks that the package lists of Plasma, Cinnamon, XFCE and LXQt still exist in the Artix repos. `--desktop all` installs, checks and boots the desktops one after another; a failing desktop doesn't stop the next one.
+
+The install without a desktop is saved as the base system. The other desktops start from a copy of it and only run the installer's desktop step, which saves the base install for every desktop; a base system from another version of the installer or its test settings, or older than a day, is installed again first. `--full` does a whole install for every desktop instead, which also tests the summary and log of a desktop install. The test pretends there's an NVIDIA graphics card, to test the driver install, but not in a run that includes sway, which doesn't support NVIDIA's driver: that way one base system suits every desktop. `--nvidia` keeps the driver; sway then gets a whole install of its own. Downloaded packages are kept in the Docker volume `artix-install-pkgcache` for the next runs; `docker volume rm artix-install-pkgcache` empties it. With a desktop, the boot test logs in through the login screen the way a person would (it types the password with xdotool), checks the session, PipeWire and the sound card, and the report shows screenshots of the login screen and the desktop.
 
 It works on macOS (Docker Desktop) and Linux (Docker Engine). The install and check stages need privileged containers, which on Linux share the host's kernel; the test only uses its own loop devices and device-mapper names, and doesn't change the host's EFI boot entries, clock, swap or console keymap.
 

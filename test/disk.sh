@@ -43,3 +43,32 @@ close_disk() {
     cryptsetup close "$MAP" 2> /dev/null || true
     losetup -d "$LOOP" || true
 }
+
+# Docker's /dev is a tmpfs; the kernel's devtmpfs gets partition and
+# /dev/mapper nodes, like the live ISO
+prepare_dev() {
+    mount -t devtmpfs devtmpfs /dev
+    mkdir -p /dev/pts /dev/shm
+    mount -t devpts devpts /dev/pts
+    mount -t tmpfs tmpfs /dev/shm
+}
+
+# /tmp/test.conf: test.conf for disk $1, with the desktop to test, local
+# DARBS/SARBS checkouts when mounted, and the NVIDIA choice of this run
+# (TEST_NVIDIA, from run-container-test.sh)
+write_test_conf() {
+    sed "s|__LOOP__|$1|" /src/test/test.conf > /tmp/test.conf
+    {
+        echo "DESKTOP=${DESKTOP:-none}"
+        if [[ -d /darbs ]]; then echo "DARBS_REPO=/darbs"; fi
+        if [[ -d /sarbs ]]; then echo "SARBS_REPO=/sarbs"; fi
+        if [[ ${TEST_NVIDIA:-yes} == no ]]; then
+            # No pretend NVIDIA GPU: the base system then suits sway too
+            echo "NVIDIA_ID="
+            echo "INSTALL_NVIDIA=no"
+        elif [[ ${DESKTOP:-none} == sway ]]; then
+            # sway doesn't support NVIDIA's driver; the installer leaves it out
+            echo "SWAY_WITHOUT_NVIDIA=yes"
+        fi
+    } >> /tmp/test.conf
+}

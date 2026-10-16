@@ -42,11 +42,13 @@ else
     C_RED=''; C_GRN=''; C_YLW=''; C_BLU=''; C_RST=''
 fi
 
-step() { printf '\n%s==> %s%s\n' "$C_BLU" "$*" "$C_RST"; }
+# With the time since the start, to see what takes long
+step() { printf '\n%s==> %s%s  [%02d:%02d]\n' "$C_BLU" "$*" "$C_RST" $((SECONDS / 60)) $((SECONDS % 60)); }
 info() { printf '    %s\n' "$*"; }
 ok()   { printf '%s  ✓ %s%s\n' "$C_GRN" "$*" "$C_RST"; }
 warn() { printf '%s  ! %s%s\n' "$C_YLW" "$*" "$C_RST" >&2; }
-die()  { printf '%sERROR: %s%s\n' "$C_RED" "$*" "$C_RST" >&2; exit 1; }
+# FAILED_AT: die explains the problem itself, see on_error
+die()  { printf '%sERROR: %s%s\n' "$C_RED" "$*" "$C_RST" >&2; FAILED_AT=""; exit 1; }
 
 # --- Prompt helpers: they only ask when the variable is still empty ---
 
@@ -392,7 +394,7 @@ install_rice() {
         cp -a "$repo" "$MNT$dir"   # a local checkout (tests)
         in_chroot chown -R "$USER_NAME:" "$dir"
     else
-        in_chroot su - "$USER_NAME" -c "git clone --depth 1 '$repo' '$dir'"
+        in_chroot su - "$USER_NAME" -c "git clone --depth 1 $(printf '%q %q' "$repo" "$dir")"
     fi
     info "$name commit $(in_chroot git -c safe.directory='*' -C "$dir" rev-parse --short HEAD 2> /dev/null || echo unknown)"
 
@@ -402,7 +404,7 @@ install_rice() {
         sed -i 's/^\[options\]$/&\n# artix-install.sh, until the rice script is done:\nDisableSandbox/' "$MNT/etc/pacman.conf"
     fi
     # Enter answers anything else the script asks with its default
-    in_chroot su - "$USER_NAME" -c "cd '$dir' && RICE_LOGIN=$DESKTOP_LOGIN ./auto-rice-artix.sh" < <(yes '') || rc=$?
+    in_chroot su - "$USER_NAME" -c "cd $(printf '%q' "$dir") && RICE_LOGIN=$DESKTOP_LOGIN ./auto-rice-artix.sh" < <(yes '') || rc=$?
     rice_cleanup
     (( rc == 0 )) || die "$name's auto-rice-artix.sh failed (exit code $rc)"
     ok "$(desktop_label "$DESKTOP")"
@@ -420,10 +422,15 @@ stop_chroot_processes() {
     sleep 1
 }
 
+# The command that failed, for the message in cleanup. die exits without it.
+FAILED_AT=""
+on_error() { FAILED_AT="line $1: $2"; }
+
 cleanup() {
     local rc=$?
     set +e
     if (( rc != 0 )); then
+        [[ -n $FAILED_AT ]] && printf '\n%sFailed at %s%s\n' "$C_RED" "$FAILED_AT" "$C_RST" >&2
         printf '\n%sThe installation failed (exit code %s). See %s%s\n' "$C_RED" "$rc" "$LOG" "$C_RST" >&2
     fi
     if mountpoint -q "$MNT" 2> /dev/null; then
@@ -440,12 +447,16 @@ usage() {
     exit 0
 }
 
+# Sourced (the tests run the desktop step on a copy of an installed base
+# system): only the functions above
+if (return 0 2> /dev/null); then return 0; fi
+
 # --- Arguments and logging ---
 
 CONFIG_FILE=""
 while (( $# )); do
     case $1 in
-        -c|--config) CONFIG_FILE=${2-}; shift 2 ;;
+        -c|--config) [[ -n ${2-} ]] || die "$1 needs a file name"; CONFIG_FILE=$2; shift 2 ;;
         --print-desktop-packages)
             desktop_packages "${2-}" || die "Desktop environments: plasma, cinnamon, xfce, lxqt"
             exit 0 ;;
@@ -490,6 +501,8 @@ CPU_VENDOR=${CPU_VENDOR-}
 NVIDIA_ID=${NVIDIA_ID-}
 INTEL_AUDIO_DSP=${INTEL_AUDIO_DSP-no}
 PACMAN_CHROOT_OPTS=${PACMAN_CHROOT_OPTS-}
+# A package cache that outlives the test runs, mounted in the new system
+PACMAN_CACHE_DIR=${PACMAN_CACHE_DIR-}
 CRYPT_NAME=${CRYPT_NAME:-cryptroot}
 # yes: a container on someone's computer, so don't touch its EFI boot
 # entries, clock or console keymap
@@ -506,6 +519,7 @@ ENABLED_SERVICES=()
 chmod 600 "$LOG"
 # Passwords are read with read -s, so they never reach the log
 exec > >(tee -a "$LOG") 2>&1
+trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
 trap cleanup EXIT
 
 cat << EOF
@@ -533,10 +547,22 @@ fi
 
 grep -qs '^ID=artix' /etc/os-release || die "This doesn't look like an Artix system. Boot the Artix base dinit ISO."
 
-for cmd in basestrap artix-chroot cryptsetup sfdisk mkfs.fat mkfs.ext4 pacman-key curl; do
+for cmd in basestrap artix-chroot cryptsetup dmsetup sfdisk mkfs.fat mkfs.ext4 pacman-key curl; do
     command -v "$cmd" > /dev/null || die "Required command '$cmd' not found. Use the Artix base dinit ISO."
 done
 ok "Required tools are present"
+
+# Before the disk is touched: pacman -Syu on the live ISO replaces its kernel
+# package, which removes the running kernel's modules, so cryptsetup open
+# can't load dm_crypt later. The test container has it from the host kernel.
+if ! dmsetup targets 2> /dev/null | grep -q '^crypt ' && ! modprobe dm_crypt 2> /dev/null; then
+    # pacman -Q linux: 7.1.8.artix1-3, uname -r: 7.1.8-artix1-3
+    if [[ $(pacman -Q linux 2> /dev/null | awk '{print $2}' | sed 's/\.artix/-artix/') != "$(uname -r)" ]]; then
+        die "The live system's kernel modules don't match its running kernel $(uname -r), most likely because the live system was updated with pacman -Syu. Reboot the live ISO and run the script without updating first (pacman -Sy git is enough)."
+    fi
+    die "Can't load the dm_crypt kernel module, which the disk encryption needs. Reboot the live ISO and try again."
+fi
+ok "Disk encryption (dm_crypt) is available"
 
 # A few tries: right after connecting, DHCP and DNS may need a moment
 online=no
@@ -583,12 +609,30 @@ if [[ -z $DISK ]]; then
     ask DISK "Disk to install to (it will be erased)" "$default_disk"
 fi
 [[ -b $DISK ]] || die "$DISK is not a block device."
+disk_type=$(lsblk -dno TYPE "$DISK")
+[[ $disk_type == part ]] && disk_type=partition
+# The tests install to a loop device
+[[ $disk_type == disk || ( $disk_type == loop && $TEST_IN_CONTAINER == yes ) ]] \
+    || die "$DISK is a $disk_type, not a whole disk. Choose a disk such as /dev/sda or /dev/nvme0n1, not one of its partitions."
 PART_EFI=$(part_name "$DISK" 1)
 PART_ROOT=$(part_name "$DISK" 2)
 DISK_SIZE=$(lsblk -dbno SIZE "$DISK")
 (( DISK_SIZE >= 20 * 1024 ** 3 )) || die "$DISK is smaller than 20 GiB."
+# Mounted file systems and active swap ([SWAP]), also on its partitions
 if lsblk -no MOUNTPOINTS "$DISK" 2> /dev/null | grep -q .; then
     die "$DISK (or a partition on it) is mounted. Is this the USB stick you booted from?"
+fi
+# An unlocked LUKS volume, LVM or RAID on the disk keeps it busy, so the new
+# partition table wouldn't take effect. $CRYPT_NAME, left over from an
+# earlier attempt, is closed before partitioning.
+in_use=()
+for holder in /sys/class/block/"${DISK##*/}"/holders/* /sys/class/block/"${DISK##*/}"/"${DISK##*/}"*/holders/*; do
+    [[ -e $holder ]] || continue
+    name=$(cat "$holder/dm/name" 2> /dev/null || basename "$holder")
+    [[ $name == "$CRYPT_NAME" ]] || in_use+=("$name")
+done
+if (( ${#in_use[@]} )); then
+    die "$DISK is in use by ${in_use[*]} (an unlocked LUKS volume, LVM or RAID). Close it first (cryptsetup close, vgchange -an or mdadm --stop), or reboot the live ISO."
 fi
 
 step "Keyboard, language and time zone"
@@ -656,10 +700,13 @@ fi
 
 step "Extras"
 info "A swap file in the encrypted root protects against out-of-memory crashes."
+# The system needs at least 16 GiB besides the swap file
+max_swap=$(( DISK_SIZE / 1024 ** 3 - 16 ))
 while :; do
     ask SWAP_SIZE "Swap file size in GiB (0 = no swap)" "4"
-    [[ $SWAP_SIZE =~ ^[0-9]+$ ]] && break
-    warn "Enter a whole number."
+    # No leading zeros: bash reads 08 as an invalid octal number
+    if [[ $SWAP_SIZE =~ ^(0|[1-9][0-9]*)$ ]] && (( SWAP_SIZE <= max_swap )); then break; fi
+    warn "Enter a whole number from 0 to $max_swap."
     SWAP_SIZE=""
 done
 
@@ -812,10 +859,6 @@ if [[ -e /dev/mapper/$CRYPT_NAME ]]; then
     cryptsetup close "$CRYPT_NAME" || die "/dev/mapper/$CRYPT_NAME is still in use; reboot the live ISO and try again"
     info "Closed $CRYPT_NAME left over from an earlier attempt"
 fi
-# Only swap on the target disk; the live system keeps its own
-for swap in $(swapon --show=NAME --noheadings 2> /dev/null); do
-    if [[ $swap == "$DISK"* ]]; then swapoff "$swap" || true; fi
-done
 wipefs -af "$DISK" > /dev/null
 sfdisk -q --wipe always "$DISK" << 'EOF'
 label: gpt
@@ -840,6 +883,10 @@ mount "/dev/mapper/$CRYPT_NAME" "$MNT"
 mkdir -p "$MNT/boot"
 mount "$PART_EFI" "$MNT/boot"
 ROOT_FS_UUID=$(blkid -s UUID -o value "/dev/mapper/$CRYPT_NAME")
+if [[ -n $PACMAN_CACHE_DIR ]]; then
+    mkdir -p "$MNT/var/cache/pacman/pkg"
+    mount --bind "$PACMAN_CACHE_DIR" "$MNT/var/cache/pacman/pkg"
+fi
 ok "Mounted the new system on $MNT"
 
 if (( SWAP_SIZE > 0 )); then

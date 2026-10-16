@@ -2,17 +2,11 @@
 # Runs inside the artix-live-sim container: runs the installer on a loop device.
 set -Eeuo pipefail
 
-# Docker's /dev is a tmpfs; the kernel's devtmpfs gets partition and
-# /dev/mapper nodes, like the live ISO
-mount -t devtmpfs devtmpfs /dev
-mkdir -p /dev/pts /dev/shm
-mount -t devpts devpts /dev/pts
-mount -t tmpfs tmpfs /dev/shm
-
-# Loop devices and mappings outlive an aborted run. Only the test's own: on
-# a Linux host, the others are the host's.
 # shellcheck source-path=SCRIPTDIR source=disk.sh
 source /src/test/disk.sh
+prepare_dev
+# Loop devices and mappings outlive an aborted run. Only the test's own: on
+# a Linux host, the others are the host's.
 umount -R /mnt 2> /dev/null || true
 release_test_disk
 
@@ -23,21 +17,23 @@ LOOP=$(losetup -fP --show "$IMG")
 trap 'losetup -d "$LOOP"' EXIT
 echo "Test disk: $LOOP"
 
-sed "s|__LOOP__|$LOOP|" /src/test/test.conf > /tmp/test.conf
-# The desktop to test, and local DARBS/SARBS checkouts when mounted
-{
-    echo "DESKTOP=${DESKTOP:-none}"
-    if [[ -d /darbs ]]; then echo "DARBS_REPO=/darbs"; fi
-    if [[ -d /sarbs ]]; then echo "SARBS_REPO=/sarbs"; fi
-    # sway doesn't support NVIDIA's driver; the installer leaves it out
-    if [[ ${DESKTOP:-none} == sway ]]; then echo "SWAY_WITHOUT_NVIDIA=yes"; fi
-} >> /tmp/test.conf
+write_test_conf "$LOOP"
 # For the verify and boot stages, also when they run on their own later
 echo "${DESKTOP:-none}" > /out/desktop.txt
 echo "${DESKTOP:-none}" > /logs/desktop.txt
+echo "${TEST_NVIDIA:-yes}" > /out/nvidia.txt
 echo "Desktop: ${DESKTOP:-none}"
 start=$(date +%s)
-bash /src/artix-install.sh --config /tmp/test.conf < /dev/null 2>&1 | tee /logs/install.log
-rc=${PIPESTATUS[0]}
+# pipefail: the installer's exit code (tee doesn't fail)
+rc=0
+bash /src/artix-install.sh --config /tmp/test.conf < /dev/null 2>&1 | tee /logs/install.log || rc=$?
 echo "Installer exit code: $rc, took $(( $(date +%s) - start ))s" | tee -a /logs/install.log
+# Without a desktop, this is the base system the desktop tests start from
+if [[ $rc == 0 && ${DESKTOP:-none} == none && -n ${BASE_KEY-} ]]; then
+    rm -f /out/base.key
+    cp --sparse=always "$IMG" /out/base.img
+    cp /out/nvidia.txt /out/base.nvidia
+    echo "$BASE_KEY" > /out/base.key
+    echo "Saved the base system for the desktop tests"
+fi
 exit "$rc"

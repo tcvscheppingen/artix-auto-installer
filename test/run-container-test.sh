@@ -14,6 +14,14 @@
 #      checks in the booted system; with a desktop, it logs in through the
 #      display manager's greeter (xdotool) and checks the session
 #
+# Stages 3-5 run once per desktop. The install stage without a desktop also
+# saves the installed disk as the base system; the other desktops start from
+# a copy of it and only run the installer's desktop step (--full: a whole
+# install for every desktop). A run with sway installs without NVIDIA's
+# driver (sway doesn't support it), so one base system suits every desktop;
+# --nvidia keeps the driver, and sway then gets a whole install of its own.
+# Downloaded packages are kept in the Docker volume artix-install-pkgcache.
+#
 # Stages 3-5 run once per desktop. Their logs, screenshots and report go to
 # out/<desktop>/ (test-report.pdf with pandoc and a TeX engine, otherwise
 # test-report.md); shellcheck and packages log to out/. With --desktop all,
@@ -25,6 +33,8 @@
 #   --desktop NAME   none (default), plasma, cinnamon, xfce, lxqt, sway, dwm or
 #                    all: each of them in turn (hours: every one installs again)
 #   --darbs          the same as --desktop dwm
+#   --full           a whole install for every desktop, not the base system
+#   --nvidia         NVIDIA's driver also when the run includes sway
 #   DARBS_DIR=~/src/DARBS SARBS_DIR=~/src/SARBS ./run-container-test.sh all --desktop sway
 #                    test local DARBS/SARBS checkouts instead of the ones on GitHub
 
@@ -32,12 +42,16 @@ set -Eeuo pipefail
 cd "$(dirname "$0")"
 
 ALL_DESKTOPS=(none plasma cinnamon xfce lxqt sway dwm)
-usage() { echo "Usage: $0 [shellcheck|packages|install|verify|boot|all|report] [--desktop none|plasma|cinnamon|xfce|lxqt|sway|dwm|all]" >&2; exit 1; }
+usage() { echo "Usage: $0 [shellcheck|packages|install|verify|boot|all|report] [--desktop none|plasma|cinnamon|xfce|lxqt|sway|dwm|all] [--full] [--nvidia]" >&2; exit 1; }
 STAGE=all
 DESKTOP_ARG=none
+FULL=no
+NVIDIA_ARG=no
 while (( $# )); do
     case $1 in
         --darbs)   DESKTOP_ARG=dwm ;;
+        --full)    FULL=yes ;;
+        --nvidia)  NVIDIA_ARG=yes ;;
         --desktop) DESKTOP_ARG=${2-}; shift ;;
         shellcheck|packages|install|verify|boot|all|report) STAGE=$1 ;;
         *) usage ;;
@@ -57,8 +71,12 @@ case $STAGE in
     *)                   DESKTOP_STAGES=("$STAGE") ;;
 esac
 (( ${#DESKTOP_STAGES[@]} )) || DESKTOPS=()
+# The pretend NVIDIA GPU, unless sway is in the run
+TEST_NVIDIA=yes
+if [[ $NVIDIA_ARG == no && " ${DESKTOPS[*]-} " == *" sway "* ]]; then TEST_NVIDIA=no; fi
 
 VOLUME=artix-install-test
+PKGCACHE=artix-install-pkgcache
 RICE_MOUNTS=()
 if [[ -n ${DARBS_DIR-} ]]; then
     DARBS_DIR=$(cd "$DARBS_DIR" && pwd)
@@ -84,13 +102,25 @@ build_images() {
 live() {
     # --privileged: loop devices, device mapper (LUKS), mounts, chroot
     docker run --rm --platform linux/amd64 --privileged \
-        -e "DESKTOP=$DESKTOP" -v "$VOLUME:/out" -v "$PWD/..:/src:ro" -v "$PWD/$OUT:/logs" \
+        -e "DESKTOP=$DESKTOP" -e "TEST_NVIDIA=$TEST_NVIDIA" -e "BASE_KEY=$(base_key)" \
+        -v "$VOLUME:/out" -v "$PKGCACHE:/pkgcache" -v "$PWD/..:/src:ro" -v "$PWD/$OUT:/logs" \
         ${RICE_MOUNTS[@]+"${RICE_MOUNTS[@]}"} artix-live-sim "$@"
 }
 
 boot_vm() {
     docker run --rm -e "BOOT_LOG=$1" -v "$VOLUME:/out" -v "$PWD:/test:ro" -v "$PWD/$OUT:/logs" \
         artix-qemu expect /test/boot-test.exp
+}
+
+# What the base system was installed with: the installer, its test
+# configuration and the NVIDIA choice. A base system from another version,
+# or older than a day (the packages move on), is installed again.
+base_key() {
+    echo "$(cat ../artix-install.sh test.conf inside-install.sh disk.sh | shasum | cut -c1-16) nvidia=$TEST_NVIDIA"
+}
+base_is_current() {
+    docker run --rm --platform linux/amd64 -e "KEY=$(base_key)" -v "$VOLUME:/out" artix-live-sim \
+        sh -c '[ "$(cat /out/base.key 2> /dev/null)" = "$KEY" ] && [ -n "$(find /out/base.img -mmin -1440 2> /dev/null)" ]'
 }
 
 # The desktop on the test disk, which inside-install.sh notes there
@@ -111,12 +141,30 @@ check_disk_desktop() {
 run_shellcheck() {
     docker run --rm -v "$PWD/..:/src:ro" koalaman/shellcheck:stable -x \
         /src/artix-install.sh /src/test/run-container-test.sh /src/test/inside-install.sh \
-        /src/test/inside-verify.sh /src/test/inside-screenshot.sh /src/test/inside-packages.sh \
+        /src/test/inside-verify.sh /src/test/inside-screenshot.sh /src/test/inside-packages.sh /src/test/inside-desktop.sh \
         /src/test/disk.sh /src/test/boot-checks.sh \
         2>&1 | tee out/shellcheck.log
 }
 run_packages()   { build_images; live bash /src/test/inside-packages.sh; }
-run_install()    { build_images; live bash /src/test/inside-install.sh; }
+# The base system on its own, for a desktop test that doesn't have one
+install_base() {
+    local DESKTOP=none OUT=out/base
+    live bash /src/test/inside-install.sh > /dev/null
+}
+run_install() {
+    build_images
+    # Without a desktop it's the base system; sway with NVIDIA needs its own
+    if [[ $FULL == yes || $DESKTOP == none || ( $DESKTOP == sway && $TEST_NVIDIA == yes ) ]]; then
+        live bash /src/test/inside-install.sh
+        return
+    fi
+    if ! base_is_current; then
+        echo "No current base system; installing it first (logs in out/base)"
+        mkdir -p out/base
+        install_base || { echo "Installing the base system failed, see out/base/install.log" >&2; return 1; }
+    fi
+    live bash /src/test/inside-desktop.sh
+}
 run_verify()     { build_images; check_disk_desktop; live bash /src/test/inside-verify.sh; }
 run_boot() {
     local rc=0
@@ -237,7 +285,7 @@ report_common() {
     fi
     echo
     echo "- Installer: commit $(git_info ..)"
-    echo "- Test configuration: CPU $(conf CPU_VENDOR), NVIDIA device $(conf NVIDIA_ID)," \
+    echo "- Test configuration: CPU $(conf CPU_VENDOR), NVIDIA device $([[ $TEST_NVIDIA == yes ]] && conf NVIDIA_ID || echo "none (sway in the run)")," \
          "LTS kernel $(conf INSTALL_LTS), AUR $(conf ENABLE_AUR), swap $(conf SWAP_SIZE) GiB"
 }
 

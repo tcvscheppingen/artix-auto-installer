@@ -1,6 +1,8 @@
 # Preset answers for artix-install.sh:  ./artix-install.sh --config install.conf
 # Anything left empty or commented out is asked for interactively.
 # Keep passwords out of this file unless you delete it afterwards.
+# The script runs this file as bash code, as root: only use a file you wrote
+# yourself or have read.
 
 #DISK=/dev/nvme0n1           # erased completely
 #HOST_NAME=artix
