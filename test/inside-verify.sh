@@ -174,8 +174,8 @@ case $DESKTOP in
         check "$USER_NAME in group video"      sh -c "chroot $M id -nG $USER_NAME | grep -qw video"
         check "sway config copied"             test -f "$H/.config/sway/config"
         check "sway session file"              test -f $M/usr/share/wayland-sessions/sway.desktop
-        check "LightDM starts sway by default" grep -qx 'user-session=sway' $M/etc/lightdm/lightdm.conf.d/50-gruvbox-rice.conf
-        check "minimal gruvbox greeter"        sh -c "grep -q '^background = /usr/share/backgrounds/gruvbox-rice/wallpaper.jpg' $M/etc/lightdm/lightdm-gtk-greeter.conf && test -s $M/usr/share/backgrounds/gruvbox-rice/wallpaper.jpg"
+        check "LightDM starts sway by default" grep -qx 'user-session=sway' $M/etc/lightdm/lightdm.conf.d/50-sarbs.conf
+        check "minimal greeter, SARBS wallpaper" sh -c "grep -q '^background = /usr/share/backgrounds/sarbs/wallpaper.jpg' $M/etc/lightdm/lightdm-gtk-greeter.conf && test -s $M/usr/share/backgrounds/sarbs/wallpaper.jpg"
         check "no TTY autostart (dm chosen)"   sh -c "! grep -qs 'exec sway' $H/.bash_profile"
         check "home files owned by $USER_NAME" sh -c "[ -z \"\$(find $H ! -uid \$(chroot $M id -u $USER_NAME) | head -1)\" ]" ;;
 esac
