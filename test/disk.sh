@@ -47,7 +47,12 @@ close_disk() {
 # Docker's /dev is a tmpfs; the kernel's devtmpfs gets partition and
 # /dev/mapper nodes, like the live ISO
 prepare_dev() {
-    mount -t devtmpfs devtmpfs /dev
+    # Not allowed in a user namespace: rootless Docker, Podman, userns-remap
+    if ! mount -t devtmpfs devtmpfs /dev; then
+        echo "Can't mount devtmpfs on /dev: the container isn't really privileged." >&2
+        echo "The test needs rootful Docker Engine (not rootless, Podman, userns-remap or snap Docker)." >&2
+        exit 1
+    fi
     mkdir -p /dev/pts /dev/shm
     mount -t devpts devpts /dev/pts
     mount -t tmpfs tmpfs /dev/shm

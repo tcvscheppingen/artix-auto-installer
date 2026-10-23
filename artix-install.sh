@@ -908,6 +908,8 @@ PACKAGES=(
     chrony chrony-dinit
     ufw ufw-dinit
     sudo git vim man-db bash-completion
+    # pacdiff, to merge the .pacnew files an upgrade leaves in /etc
+    pacman-contrib
 )
 # No mesa, Vulkan or VA-API: the desktop step installs those. The NVIDIA
 # module needs its own userspace, nvidia-utils, which pulls in mesa.
@@ -1218,6 +1220,14 @@ Installed on $(date '+%F %R %Z') with artix-install.sh $SCRIPT_VERSION.
   Status: \`sudo ufw status verbose\`. Allow ssh: \`sudo ufw allow ssh\`.
   A GUI: $([[ $DESKTOP == plasma ]] && echo "System Settings > Firewall" || echo "\`sudo pacman -S gufw\`")
 - Keyring: initialised and populated (artix-keyring)
+
+## Updates
+
+Update with \`sudo pacman -Syu\`, and check the Artix news (https://artixlinux.org/news.php)
+first. When an upgrade has a new version of a config file you changed, pacman
+saves it next to yours as .pacnew. Merge those right after the upgrade with
+\`sudo pacdiff\`, before you reboot: an unmerged file in /etc/pam.d can stop
+turnstile, and with it PipeWire, from starting at login.
 EOF
 )
 

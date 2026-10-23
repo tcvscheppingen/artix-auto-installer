@@ -100,6 +100,17 @@ build_images() {
     docker build -q -t artix-qemu -f Dockerfile.qemu . > /dev/null
 }
 
+# Loop devices, LUKS and the devtmpfs mount need real root: a privileged
+# container in a user namespace (rootless Docker, userns-remap) isn't enough
+check_rootful_docker() {
+    local opts
+    opts=$(docker info --format '{{json .SecurityOptions}}' 2> /dev/null) || return 0
+    if [[ $opts == *name=rootless* || $opts == *name=userns* ]]; then
+        echo "Docker runs rootless or with userns-remap; the install, verify and boot stages need rootful Docker Engine" >&2
+        return 1
+    fi
+}
+
 live() {
     # --privileged: loop devices, device mapper (LUKS), mounts, chroot
     docker run --rm --platform linux/amd64 --privileged \
@@ -155,6 +166,7 @@ install_base() {
     live bash /src/test/inside-install.sh > /dev/null
 }
 run_install() {
+    check_rootful_docker
     build_images
     # Without a desktop it's the base system; sway with NVIDIA needs its own
     if [[ $FULL == yes || $DESKTOP == none || ( $DESKTOP == sway && $TEST_NVIDIA == yes ) ]]; then
@@ -168,9 +180,10 @@ run_install() {
     fi
     live bash /src/test/inside-desktop.sh
 }
-run_verify()     { build_images; check_disk_desktop; live bash /src/test/inside-verify.sh; }
+run_verify()     { check_rootful_docker; build_images; check_disk_desktop; live bash /src/test/inside-verify.sh; }
 run_boot() {
     local rc=0
+    check_rootful_docker
     build_images
     check_disk_desktop
     rm -f "$OUT/dm-screenshot.png" "$OUT/desktop-screenshot.png"

@@ -79,6 +79,10 @@ The script erases the whole disk you choose; it asks you to type `ERASE` before 
 
 To answer some or all questions in advance, copy `install.conf.example`, fill it in and run `./artix-install.sh --config install.conf`. Anything you leave empty is still asked.
 
+## Updating
+
+Update the installed system with `sudo pacman -Syu`, and read the [Artix news](https://artixlinux.org/news.php) first. When an upgrade brings a new version of a config file you (or the script) changed, pacman keeps yours and saves the new one next to it as `.pacnew`. Merge those right after the upgrade, before you reboot, with `sudo pacdiff` (the script installs it). An unmerged file in `/etc/pam.d` can stop turnstile from starting at login, and then PipeWire doesn't start either, so there is no sound.
+
 ## Testing
 
 This part is for people working on the script. `test/run-container-test.sh` tests the installer automatically with Docker: it runs the installer in an Artix container against a disk image, checks the installed system, and boots it in a virtual machine (QEMU, UEFI, NVMe) to check it from the inside.
@@ -100,7 +104,7 @@ To save time, the install without a desktop is kept as a base system, and the ot
 
 With a desktop, the boot test logs in through the login screen the way a person would, checks the session and the sound, and takes screenshots for the report.
 
-It works on macOS (Docker Desktop) and Linux (Docker Engine). The install and check stages need privileged containers, which on Linux share the host's kernel; the test only uses its own loop devices and device-mapper names, and doesn't change the host's EFI boot entries, clock, swap or console keymap.
+It works on macOS (Docker Desktop) and Linux (rootful Docker Engine; not rootless Docker, Podman, userns-remap or the snap package). The install and check stages need privileged containers, which on Linux share the host's kernel; the test only uses its own loop devices and device-mapper names, and doesn't change the host's EFI boot entries, clock, swap or console keymap.
 
 Each desktop's logs, screenshots and report end up in `test/out/<desktop>/`, so runs for different desktops don't overwrite each other. `--desktop all` also writes `test/out/test-report.pdf`, with a summary of all desktops followed by each one's results. The reports are PDFs when pandoc and a TeX engine (xelatex, lualatex, pdflatex or tectonic) are installed, otherwise Markdown.
 

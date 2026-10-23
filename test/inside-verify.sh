@@ -74,7 +74,13 @@ for s in NetworkManager ufw; do
     check "service $s enabled"                 test -L $M/etc/dinit.d/boot.d/$s
 done
 check "time sync service enabled"              sh -c "ls $M/etc/dinit.d/boot.d/ | grep -q chrony"
-check "ufw ENABLED=yes"                        grep -q '^ENABLED=yes' $M/etc/ufw/ufw.conf
+check "pacdiff installed (pacman-contrib)"     chroot $M pacman -Q pacman-contrib
+# ufw-dinit runs ufw enable at boot and ufw disable at shutdown, which
+# writes ENABLED=no; so ENABLED=yes only until the first boot (its log)
+check "ufw service enables ufw at boot"        grep -qE '^command\s*=\s*/usr/bin/ufw enable' $M/etc/dinit.d/ufw
+if [[ ! -e $M/var/log/dinit/ufw.log ]]; then
+    check "ufw ENABLED=yes"                    grep -q '^ENABLED=yes' $M/etc/ufw/ufw.conf
+fi
 check "ufw default deny incoming"              grep -q '^DEFAULT_INPUT_POLICY="DROP"' $M/etc/default/ufw
 if [[ $ENABLE_AUR == yes ]]; then
     check "yay installed"                      chroot $M pacman -Q yay
