@@ -1,4 +1,7 @@
 # Artix Auto Installer
+
+![artix-install.sh: one script for an encrypted Artix desktop, with the sway, dwm, Plasma and Xfce desktops it installs](assets/hero.png)
+
 Personal script for installing Artix Linux with Dinit on UEFI PCs/laptops.
 
 ![The installer installing Artix with KDE Plasma, then booting, unlocking the disk and logging in to Plasma (sped up)](assets/install-demo.gif)
