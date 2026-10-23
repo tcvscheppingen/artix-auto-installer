@@ -112,5 +112,8 @@ It works on macOS (Docker Desktop) and Linux (rootful Docker Engine; not rootles
 Each desktop's logs, screenshots and report end up in `test/out/<desktop>/`, so runs for different desktops don't overwrite each other. `--desktop all` also writes `test/out/test-report.pdf`, with a summary of all desktops followed by each one's results. The reports are PDFs when pandoc and a TeX engine (xelatex, lualatex, pdflatex or tectonic) are installed, otherwise Markdown.
 
 ## Disclaimer
-I wrote this script with assistance from a Large Language Model.   
+I wrote this script with assistance from a Large Language Model.  
+I came up with the idea and decided what the script installs and how. I wrote the README, made the dotfiles for [DARBS](https://github.com/tcvscheppingen/DARBS), reviewed all of the code and tested the script on my own hardware.  
+The LLM built the automated tests, helped with debugging and fixing problems, made the dotfiles for [SARBS](https://github.com/tcvscheppingen/SARBS), created the social preview and hero image and checked the README for spelling and grammar. The desktop screenshots are made by the automated tests.
+
 Never run any scripts without checking the contents first.
