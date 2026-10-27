@@ -1,7 +1,5 @@
 # Artix Auto Installer
 
-![artix-install.sh: one script for an encrypted Artix desktop, with the sway, dwm, Plasma and Xfce desktops it installs](assets/hero.png)
-
 My personal script to install Artix Linux with Dinit on UEFI PCs and laptops.
 
 ![The installer installing Artix with KDE Plasma, then booting, unlocking the disk and logging in to Plasma (sped up)](assets/install-demo.gif)
@@ -107,7 +105,7 @@ An unmerged file in `/etc/pam.d` can stop turnstile from starting when you log i
 
 If you set up Timeshift and an update broke something, you can go back to a snapshot from before the update.
 Only the system files are restored, your home folder is not touched.
-Timeshift restarts your computer when it is done, so save your work first.
+Save your work first, because you will need to restart your computer afterwards.
 
 These are the commands to restore a snapshot:
 
@@ -116,9 +114,13 @@ These are the commands to restore a snapshot:
 sudo timeshift --list
 # replace the name with the snapshot you want to restore
 sudo timeshift --restore --snapshot '2026-10-27_09-00-01' --skip-grub
+# when it says "Restore completed"
+sudo reboot
 ```
 
 Press Enter to keep the default answers and type `y` to confirm.
+When Timeshift says _Restore completed_, restart your computer with `sudo reboot`.
+Timeshift tries to restart it by itself, but that doesn't work on Artix. You can ignore the error it shows about that.
 The `--skip-grub` option is important: the snapshot already contains the boot menu. Without it, Timeshift reinstalls GRUB in a way that doesn't match this installation.
 
 ### If your desktop still works
@@ -169,7 +171,9 @@ The reports are PDFs if pandoc and a TeX engine (xelatex, lualatex, pdflatex or 
 
 ## Disclaimer
 I wrote this script with assistance from a Large Language Model.  
+
 I came up with the idea and decided what the script installs and how. I wrote the README, made the dotfiles for [DARBS](https://github.com/tcvscheppingen/DARBS), reviewed all of the code and tested the script on my own hardware.  
-The LLM built the automated tests, helped with debugging and fixing problems, made the dotfiles for [SARBS](https://github.com/tcvscheppingen/SARBS), created the social preview and hero image and checked the README for spelling and grammar. The desktop screenshots are made by the automated tests.
+
+The LLM built the automated tests, helped with debugging and fixing problems, made the dotfiles for [SARBS](https://github.com/tcvscheppingen/SARBS), created the social preview and checked the README for spelling and grammar. The desktop screenshots are made by the automated tests.
 
 Never run any scripts without checking the contents first.
