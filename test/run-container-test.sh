@@ -302,7 +302,7 @@ report_common() {
     echo
     echo "- Installer: commit $(git_info ..)"
     echo "- Test configuration: CPU $(conf CPU_VENDOR), NVIDIA device $([[ $TEST_NVIDIA == yes ]] && conf NVIDIA_ID || echo "none (sway in the run)")," \
-         "LTS kernel $(conf INSTALL_LTS), AUR $(conf ENABLE_AUR), swap $(conf SWAP_SIZE) GiB"
+         "LTS kernel $(conf INSTALL_LTS), Timeshift $(conf ENABLE_TIMESHIFT), AUR $(conf ENABLE_AUR), swap $(conf SWAP_SIZE) GiB"
 }
 
 # One desktop's results. $1: heading level, $2: path to its folder from the

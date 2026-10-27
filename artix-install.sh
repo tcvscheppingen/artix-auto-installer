@@ -6,7 +6,8 @@
 #   * UEFI only, GPT, 1 GiB unencrypted EFI partition mounted at /boot
 #   * LUKS2 encrypted root (ext4); the initramfs asks for the passphrase
 #   * GRUB, NetworkManager, chrony, ufw firewall (deny incoming)
-#   * optional: linux-lts fallback kernel, NVIDIA driver, yay (AUR)
+#   * optional: linux-lts fallback kernel, Timeshift snapshots, NVIDIA driver,
+#     yay (AUR)
 #   * optional desktop: KDE Plasma, Cinnamon, XFCE or LXQt, or sway
 #     (https://github.com/tcvscheppingen/SARBS) or dwm
 #     (https://github.com/tcvscheppingen/DARBS); without one it boots to a TTY
@@ -484,6 +485,7 @@ KEYMAP=${KEYMAP-}
 LOCALE=${LOCALE-}
 SWAP_SIZE=${SWAP_SIZE-}
 INSTALL_LTS=${INSTALL_LTS-}
+ENABLE_TIMESHIFT=${ENABLE_TIMESHIFT-}
 INSTALL_NVIDIA=${INSTALL_NVIDIA-}
 AUDIO_LEGACY_HDA=${AUDIO_LEGACY_HDA-}
 ENABLE_AUR=${ENABLE_AUR-}
@@ -715,6 +717,12 @@ info "The LTS kernel is a second entry in the GRUB menu, which you can"
 info "use when an update of the normal kernel doesn't boot."
 ask_yes_no INSTALL_LTS "Install the linux-lts fallback kernel?" y
 
+info ""
+info "Timeshift takes a snapshot of the system (not your home folder) every day"
+info "and before every pacman upgrade, so you can roll back an update that breaks"
+info "something. The snapshots are kept on the same disk, in /timeshift."
+ask_yes_no ENABLE_TIMESHIFT "Set up Timeshift snapshots?" y
+
 if (( ${#NVIDIA_PKGS[@]} > 0 )); then
     info ""
     info "Without NVIDIA's proprietary driver the open nouveau driver is used. It"
@@ -805,6 +813,7 @@ cat << EOF
     Time zone       : $TIMEZONE
     Swap file       : $([[ $SWAP_SIZE == 0 ]] && echo none || echo "$SWAP_SIZE GiB")
     LTS kernel      : $INSTALL_LTS
+    Timeshift       : $ENABLE_TIMESHIFT
     NVIDIA driver   : $([[ $INSTALL_NVIDIA == yes ]] && echo "${NVIDIA_PKGS[*]}" || echo no)
     Sound driver    : $([[ $AUDIO_LEGACY_HDA == yes ]] && echo "older HDA driver (no SOF)" || echo default)
     AUR (yay)       : $ENABLE_AUR
@@ -1122,7 +1131,76 @@ case $DESKTOP in
         install_rice ;;
 esac
 
-# --- 10. Summary ---
+# --- 10. Optional: Timeshift ---
+
+# After every other pacman run, so the hook doesn't take snapshots during the
+# installation
+if [[ $ENABLE_TIMESHIFT == yes ]]; then
+    step "Setting up Timeshift snapshots"
+    # timeshift depends on cronie, which runs its scheduled snapshots
+    chroot_pacman -S --needed --noconfirm timeshift cronie cronie-dinit
+    enable_service cronie
+    # What timeshift's setup wizard writes: rsync snapshots of the root file
+    # system in /timeshift, without the home folders. Plus the package cache,
+    # which pacman can download again.
+    cat > "$MNT/etc/timeshift/timeshift.json" << EOF
+{
+  "backup_device_uuid" : "$ROOT_FS_UUID",
+  "parent_device_uuid" : "$LUKS_UUID",
+  "do_first_run" : "false",
+  "btrfs_mode" : "false",
+  "include_btrfs_home_for_backup" : "false",
+  "include_btrfs_home_for_restore" : "false",
+  "stop_cron_emails" : "true",
+  "schedule_monthly" : "false",
+  "schedule_weekly" : "false",
+  "schedule_daily" : "true",
+  "schedule_hourly" : "false",
+  "schedule_boot" : "false",
+  "count_monthly" : "2",
+  "count_weekly" : "3",
+  "count_daily" : "5",
+  "count_hourly" : "6",
+  "count_boot" : "5",
+  "exclude" : [
+    "/root/**",
+    "/home/$USER_NAME/**",
+    "/var/cache/pacman/pkg/**"
+  ],
+  "exclude-apps" : [
+  ]
+}
+EOF
+    # The cron job timeshift writes itself once it has run: every hour it
+    # checks whether the daily snapshot is due
+    cat > "$MNT/etc/cron.d/timeshift-hourly" << 'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+MAILTO=""
+
+0 * * * * root timeshift --check --scripted
+EOF
+    # Tagged daily, so they count towards the daily snapshots and timeshift
+    # removes them after 5 days. No --comments: timeshift never removes a
+    # snapshot with a comment. When the snapshot fails (a full disk), pacman
+    # warns and upgrades anyway.
+    mkdir -p "$MNT/etc/pacman.d/hooks"
+    cat > "$MNT/etc/pacman.d/hooks/00-timeshift.hook" << 'EOF'
+# Snapshot before upgrades (artix-install.sh). Remove this file to stop them.
+[Trigger]
+Operation = Upgrade
+Type = Package
+Target = *
+
+[Action]
+Description = Taking a Timeshift snapshot before the upgrade...
+When = PreTransaction
+Exec = /usr/bin/timeshift --create --scripted --tags D
+EOF
+    ok "Timeshift: a daily snapshot and one before every pacman upgrade, kept for 5 days"
+fi
+
+# --- 11. Summary ---
 
 step "Finishing"
 kernel_pkgs=(linux)
@@ -1197,6 +1275,7 @@ Installed on $(date '+%F %R %Z') with artix-install.sh $SCRIPT_VERSION.
 - Host name: $HOST_NAME
 - Kernels: $KERNELS
 - Fallback kernel: $([[ $INSTALL_LTS == yes ]] && echo "linux-lts, the second entry in the GRUB menu" || echo none)
+- Snapshots: $([[ $ENABLE_TIMESHIFT == yes ]] && echo "Timeshift, see Snapshots" || echo none)
 - Bootloader: GRUB, EFI entry "artix" and the fallback path \\EFI\\BOOT\\BOOTX64.EFI
 - Init: dinit; enabled services (/etc/dinit.d/boot.d): ${ENABLED_SERVICES[*]}
 - Locale: $LOCALE
@@ -1256,6 +1335,43 @@ don't work with it. With DARBS, run `sound-fix`. Without it, run
 Then reboot.
 EOF
 )
+    fi
+fi
+if [[ $ENABLE_TIMESHIFT == yes ]]; then
+    SUMMARY+=$(cat << 'EOF'
+
+
+## Snapshots
+
+Timeshift takes a snapshot of the system in /timeshift once a day (the first
+within an hour after the first boot) and before every `pacman -Syu`. It removes
+them after 5 days, but always keeps the 5 newest. Files that didn't change are
+shared between snapshots, so each one only takes the space of what changed.
+Your home folder is not in them: back it up separately. The snapshots are on
+the same disk, so they don't help when the disk itself fails.
+
+- List them: `sudo timeshift --list`
+- Take one now: `sudo timeshift --create --comments "before trying X"`. Timeshift
+  never removes these itself: delete them with `sudo timeshift --delete`.
+- Stop the snapshots before upgrades: `sudo rm /etc/pacman.d/hooks/00-timeshift.hook`
+
+To roll back, pick a snapshot and restore it. Only the system files go back,
+not your home folder, and Timeshift restarts the computer when it's done:
+
+    sudo timeshift --list
+    sudo timeshift --restore --snapshot '2026-10-27_09-00-01' --skip-grub
+
+Press Enter for the default answers and y to confirm. Keep --skip-grub: the
+snapshot already has the boot menu, and Timeshift's own GRUB install doesn't
+match this one.
+
+- The desktop still works: run the commands in a terminal, or use the Timeshift
+  app and turn off reinstalling GRUB under Bootloader Options.
+- The desktop doesn't start: press Ctrl+Alt+F2, log in and run the commands there.
+EOF
+)
+    if [[ $INSTALL_LTS == yes ]]; then
+        SUMMARY+=$'\n'"- The system doesn't boot after a kernel update: pick linux-lts in the GRUB menu, then restore."
     fi
 fi
 SUMMARY+=$'\n\n'"The full installation log: /var/log/artix-install/install.log"

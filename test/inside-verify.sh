@@ -82,6 +82,22 @@ if [[ ! -e $M/var/log/dinit/ufw.log ]]; then
     check "ufw ENABLED=yes"                    grep -q '^ENABLED=yes' $M/etc/ufw/ufw.conf
 fi
 check "ufw default deny incoming"              grep -q '^DEFAULT_INPUT_POLICY="DROP"' $M/etc/default/ufw
+if [[ $ENABLE_TIMESHIFT == yes ]]; then
+    check "timeshift installed"                chroot $M pacman -Q timeshift
+    check "service cronie enabled"             test -L $M/etc/dinit.d/boot.d/cronie
+    TS=$M/etc/timeshift/timeshift.json
+    ROOT_UUID=$(blkid -s UUID -o value /dev/mapper/$MAP)
+    check "timeshift snapshots the root fs"    grep -q "\"backup_device_uuid\" : \"$ROOT_UUID\"" $TS
+    check "timeshift: daily, no setup wizard"  sh -c "grep -q '\"schedule_daily\" : \"true\"' $TS && grep -q '\"do_first_run\" : \"false\"' $TS"
+    check "timeshift excludes the home folder" grep -qF "\"/home/$USER_NAME/**\"" $TS
+    check "timeshift hourly cron job"          grep -q 'root timeshift --check --scripted' $M/etc/cron.d/timeshift-hourly
+    check "pacman hook snapshots before upgrades" grep -qx 'When = PreTransaction' $M/etc/pacman.d/hooks/00-timeshift.hook
+    # timeshift never removes a snapshot with a comment
+    check "pacman hook snapshots get removed"  sh -c "grep -q -- '--tags D' $M/etc/pacman.d/hooks/00-timeshift.hook && ! grep -q -- '--comments' $M/etc/pacman.d/hooks/00-timeshift.hook"
+    check "summary explains restoring a snapshot" grep -q -- "--restore --snapshot '.*' --skip-grub" "$M/home/$USER_NAME/artix-install-summary.md"
+else
+    check "no timeshift (not enabled)"         sh -c "! chroot $M pacman -Q timeshift"
+fi
 if [[ $ENABLE_AUR == yes ]]; then
     check "yay installed"                      chroot $M pacman -Q yay
     check "go removed after yay build"         sh -c "! chroot $M pacman -Q go"

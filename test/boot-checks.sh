@@ -25,6 +25,12 @@ check "console keymap us-acentos active" sh -c "dumpkeys -C /dev/tty1 | grep -q 
 check "user is in wheel"                sh -c "id -nG tester | grep -qw wheel"
 check "sudoers grants tester (ALL : ALL)" sh -c "sudo -l -U tester | grep -q '(ALL : ALL) ALL'"
 check "root password locked"            sh -c "passwd -S root | awk '{print \$2}' | grep -qx L"
+if [ -e /etc/timeshift/timeshift.json ]; then
+    check "dinit service cronie started" sh -c "dinitctl status cronie | grep -qi 'started'"
+    # Finds the root file system from the config, without taking a snapshot
+    check "timeshift uses the root fs (rsync)" sh -c "out=\$(timeshift --list --scripted 2>&1); echo \"\$out\" | grep -qE \"^UUID +: \$(findmnt -no UUID /)\" && echo \"\$out\" | grep -qE '^Mode +: RSYNC'"
+    timeshift --list --scripted 2>&1 | head -n 8
+fi
 # yay only when the test enabled the AUR (verify checks which)
 if command -v yay > /dev/null; then
     check "yay runs"                    sh -c "yay --version"
@@ -166,8 +172,16 @@ if [ "$DESKTOP" != none ]; then
         plasma)
             # Plasma's first start takes long on the emulated CPU
             sleep 90
-            wl="$run WAYLAND_DISPLAY=wayland-0"
-            check "screenshot of the desktop" sh -c "$as_tester '$wl spectacle -b -n -f -o $shot' && test -s $shot" ;;
+            # KWin takes the first free name, not always wayland-0
+            set -- /run/user/"$uid"/wayland-?
+            wl="$run WAYLAND_DISPLAY=$(basename "$1")"
+            check "screenshot of the desktop" sh -c "$as_tester '$wl spectacle -b -n -f -o $shot' && test -s $shot"
+            if [ ! -s $shot ]; then
+                # Why it failed: spectacle's own message, and what runs
+                $as_tester "$wl spectacle -b -n -f -o $shot" 2>&1 | tail -n 5 | sed 's/^/NOTE  spectacle: /'
+                echo "NOTE  runtime dir: $(cd /run/user/"$uid" && echo *)"
+                pgrep -u tester -l -f 'kwin|plasmashell|xdg-desktop-portal' | sed 's/^/NOTE  /'
+            fi ;;
     esac
 fi
 echo "== BOOT CHECKS: $pass passed, $fail failed"

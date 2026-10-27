@@ -46,8 +46,13 @@ desktop_step() {
         *)                         die "Not a desktop: $DESKTOP" ;;
     esac
 }
+# The base system has the Timeshift hook already; the installer writes it after
+# the desktop step, so keep it out of the desktop's pacman runs
+hook=$M/etc/pacman.d/hooks/00-timeshift.hook
+[[ -e $hook ]] && mv "$hook" "$hook.off"
 start=$(date +%s)
 rc=0
 desktop_step < /dev/null 2>&1 | tee /logs/install.log || rc=$?
+[[ -e $hook.off ]] && mv "$hook.off" "$hook"
 echo "Installer exit code: $rc, took $(( $(date +%s) - start ))s" | tee -a /logs/install.log
 exit "$rc"

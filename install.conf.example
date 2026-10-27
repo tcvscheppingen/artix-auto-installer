@@ -16,6 +16,7 @@
 #LOCALE=en_US.UTF-8
 #SWAP_SIZE=4                 # GiB, 0 = no swap file
 #INSTALL_LTS=yes             # linux-lts as a fallback kernel
+#ENABLE_TIMESHIFT=yes        # daily Timeshift snapshots and one before every pacman upgrade
 #INSTALL_NVIDIA=             # yes/no, only asked when an NVIDIA GPU is found
 #AUDIO_LEGACY_HDA=           # yes = older HDA sound driver instead of SOF (asked for Intel audio with a DSP)
 #ENABLE_AUR=no               # yes = build and install yay
