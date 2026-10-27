@@ -1158,7 +1158,9 @@ enable_base_services() {
 }
 
 # DKMS builds the module while the packages install; check it did for every
-# kernel. On a hybrid laptop, add prime-run.
+# kernel. On a hybrid laptop, add prime-run and let the GPU power off when
+# idle. Suspend needs nothing: the driver saves the video memory through
+# kernel suspend notifiers, and nvidia-utils has an elogind hook for resume.
 check_nvidia_driver() {
     local kdir
     for kdir in "$MNT"/usr/lib/modules/*/; do
@@ -1174,8 +1176,20 @@ export __NV_PRIME_RENDER_OFFLOAD=1 __VK_LAYER_NV_optimus=NVIDIA_only __GLX_VENDO
 exec "$@"
 EOF
         chmod 755 "$MNT/usr/local/bin/prime-run"
+        # The driver's default only powers off Ampere and newer laptop GPUs
+        cat > "$MNT/etc/modprobe.d/nvidia-power.conf" << 'EOF'
+# Power off the NVIDIA GPU when it is idle (artix-install.sh)
+options nvidia NVreg_DynamicPowerManagement=0x02
+EOF
+        # Runtime PM for the GPU's PCI device, from NVIDIA's README
+        mkdir -p "$MNT/etc/udev/rules.d"
+        cat > "$MNT/etc/udev/rules.d/80-nvidia-pm.rules" << 'EOF'
+# Runtime power management for the NVIDIA GPU (artix-install.sh)
+ACTION=="bind", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x03[0-9]*", TEST=="power/control", ATTR{power/control}="auto"
+ACTION=="unbind", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x03[0-9]*", TEST=="power/control", ATTR{power/control}="on"
+EOF
     fi
-    ok "${NVIDIA_PKGS[0]} built for every kernel$([[ $OTHER_GPU == yes ]] && echo "; run a program on the NVIDIA GPU with: prime-run <program>")"
+    ok "${NVIDIA_PKGS[0]} built for every kernel$([[ $OTHER_GPU == yes ]] && echo "; powers off when idle; run a program on the NVIDIA GPU with: prime-run <program>")"
 }
 
 # --- 8-10. Optional: AUR helper, desktop, Timeshift ---
@@ -1285,7 +1299,7 @@ EOF
 
 summary_nvidia_line() {
     if [[ $INSTALL_NVIDIA == yes ]]; then
-        echo "${NVIDIA_PKGS[*]}$([[ $OTHER_GPU == yes ]] && echo "; run a program on the NVIDIA GPU with \`prime-run <program>\`")"
+        echo "${NVIDIA_PKGS[*]}$([[ $OTHER_GPU == yes ]] && echo "; the GPU powers off when idle (\`/etc/modprobe.d/nvidia-power.conf\`); run a program on it with \`prime-run <program>\`")"
     elif [[ -n $NVIDIA_ID ]]; then
         echo "not installed, the open nouveau driver is used"
     else

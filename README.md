@@ -26,6 +26,7 @@ You can also choose to:
 - Set up [Timeshift](https://github.com/linuxmint/timeshift). It takes a snapshot of your system every day and before every update, so you can undo an update that breaks something. Snapshots are removed after 5 days.
   Note that your home folder is not in the snapshots and the snapshots are on the same disk, so they don't replace a backup. See [Restoring a snapshot](#restoring-a-snapshot).
 - Install NVIDIA's own driver if your computer has an NVIDIA graphics card. The script picks the right driver for your card. Cards from the GeForce GTX 750/900 series (2014) and newer are supported.
+  On a laptop that also has Intel or AMD graphics, the NVIDIA card turns itself off when you don't use it, which saves battery.
 - Switch to the older sound driver on laptops where the newer one gives no sound and the sound settings only show _dummy output_. Note that the built-in microphones of the laptop don't work with the older driver.
 - Enable the AUR (Arch User Repository) and install `yay`. The AUR is a large collection of software made by other users. AUR software isn't checked by Artix or Arch, so only install what you trust.
 - Install a desktop (see below). Without one, your computer boots to a text console where you log in and type commands.
