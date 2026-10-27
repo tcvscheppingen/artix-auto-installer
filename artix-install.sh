@@ -237,14 +237,13 @@ rank_mirrors() {
     ok "$count of $(grep -c '^[[:space:]]*Server' "$list.stock") mirrors answered, fastest: $(awk '/^Server/ {sub(/^[a-z]+:\/\//, "", $3); sub(/\/.*/, "", $3); print $3; exit}' "$list")"
 }
 
-# Sets NVIDIA_ID (PCI device ID of the first NVIDIA GPU), OTHER_GPU (an
-# Intel/AMD GPU next to it: hybrid laptop), GPU_PKGS (Vulkan and VA-API for
+# Sets NVIDIA_ID (PCI device ID of the first NVIDIA GPU), OTHER_GPU (yes: an
+# Intel/AMD GPU next to it, a hybrid laptop; can be preset for tests), GPU_PKGS (Vulkan and VA-API for
 # the Intel/AMD GPUs, for the desktop environments) and NVIDIA_PKGS. By generation:
 # Turing and newer (>= 0x1e00) use the open kernel modules, Maxwell to Volta
 # (>= 0x1340) the 580xx branch, and Kepler and older have no packaged driver.
 detect_gpus() {
     local dev class vendor id
-    OTHER_GPU=no
     NVIDIA_PKGS=()
     GPU_PKGS=()
     for dev in /sys/bus/pci/devices/*; do
@@ -507,6 +506,7 @@ load_settings() {
     CPU_VENDOR=${CPU_VENDOR-}
     NVIDIA_ID=${NVIDIA_ID-}
     INTEL_AUDIO_DSP=${INTEL_AUDIO_DSP-no}
+    OTHER_GPU=${OTHER_GPU:-no}
     PACMAN_CHROOT_OPTS=${PACMAN_CHROOT_OPTS-}
     # A package cache that outlives the test runs, mounted in the new system
     PACMAN_CACHE_DIR=${PACMAN_CACHE_DIR-}
@@ -1157,10 +1157,15 @@ enable_base_services() {
     ok "Enabled: ${ENABLED_SERVICES[*]}"
 }
 
+# A hybrid laptop with a Turing or newer GPU: the GPU can power off when idle
+# (NVIDIA's runtime D3 needs Turing; older GPUs ignore the setting)
+nvidia_powers_off() { [[ $OTHER_GPU == yes ]] && (( NVIDIA_ID >= 0x1e00 )); }
+
 # DKMS builds the module while the packages install; check it did for every
-# kernel. On a hybrid laptop, add prime-run and let the GPU power off when
-# idle. Suspend needs nothing: the driver saves the video memory through
-# kernel suspend notifiers, and nvidia-utils has an elogind hook for resume.
+# kernel. On a hybrid laptop, add prime-run, and let a Turing or newer GPU
+# power off when idle. Suspend needs nothing: the driver saves the video
+# memory through kernel suspend notifiers, and nvidia-utils has an elogind
+# hook for resume.
 check_nvidia_driver() {
     local kdir
     for kdir in "$MNT"/usr/lib/modules/*/; do
@@ -1176,6 +1181,8 @@ export __NV_PRIME_RENDER_OFFLOAD=1 __VK_LAYER_NV_optimus=NVIDIA_only __GLX_VENDO
 exec "$@"
 EOF
         chmod 755 "$MNT/usr/local/bin/prime-run"
+    fi
+    if nvidia_powers_off; then
         # The driver's default only powers off Ampere and newer laptop GPUs
         cat > "$MNT/etc/modprobe.d/nvidia-power.conf" << 'EOF'
 # Power off the NVIDIA GPU when it is idle (artix-install.sh)
@@ -1185,11 +1192,13 @@ EOF
         mkdir -p "$MNT/etc/udev/rules.d"
         cat > "$MNT/etc/udev/rules.d/80-nvidia-pm.rules" << 'EOF'
 # Runtime power management for the NVIDIA GPU (artix-install.sh)
-ACTION=="bind", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x03[0-9]*", TEST=="power/control", ATTR{power/control}="auto"
-ACTION=="unbind", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x03[0-9]*", TEST=="power/control", ATTR{power/control}="on"
+ACTION=="bind", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x030000", TEST=="power/control", ATTR{power/control}="auto"
+ACTION=="bind", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x030200", TEST=="power/control", ATTR{power/control}="auto"
+ACTION=="unbind", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x030000", TEST=="power/control", ATTR{power/control}="on"
+ACTION=="unbind", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x030200", TEST=="power/control", ATTR{power/control}="on"
 EOF
     fi
-    ok "${NVIDIA_PKGS[0]} built for every kernel$([[ $OTHER_GPU == yes ]] && echo "; powers off when idle; run a program on the NVIDIA GPU with: prime-run <program>")"
+    ok "${NVIDIA_PKGS[0]} built for every kernel$(nvidia_powers_off && echo "; powers off when idle")$([[ $OTHER_GPU == yes ]] && echo "; run a program on the NVIDIA GPU with: prime-run <program>")"
 }
 
 # --- 8-10. Optional: AUR helper, desktop, Timeshift ---
@@ -1299,7 +1308,7 @@ EOF
 
 summary_nvidia_line() {
     if [[ $INSTALL_NVIDIA == yes ]]; then
-        echo "${NVIDIA_PKGS[*]}$([[ $OTHER_GPU == yes ]] && echo "; the GPU powers off when idle (\`/etc/modprobe.d/nvidia-power.conf\`); run a program on it with \`prime-run <program>\`")"
+        echo "${NVIDIA_PKGS[*]}$(nvidia_powers_off && echo "; the GPU powers off when idle, see NVIDIA")$([[ $OTHER_GPU == yes ]] && echo "; run a program on it with \`prime-run <program>\`")"
     elif [[ -n $NVIDIA_ID ]]; then
         echo "not installed, the open nouveau driver is used"
     else
@@ -1357,6 +1366,21 @@ don't work with it. With DARBS, run `sound-fix`. Without it, run
 Then reboot.
 EOF
     fi
+}
+
+summary_nvidia_section() {
+    cat << 'EOF'
+
+## NVIDIA
+
+The NVIDIA GPU powers off when no program uses it, which saves battery
+(/etc/modprobe.d/nvidia-power.conf and /etc/udev/rules.d/80-nvidia-pm.rules).
+Check it with `cat /proc/driver/nvidia/gpus/*/power`: "Runtime D3 status:
+Enabled (fine-grained)". When the laptop's firmware doesn't support it, that
+says "Not supported" and the GPU just stays on. If programs on the GPU crash
+or the log shows "GPU has fallen off the bus", turn it off with
+`sudo rm /etc/modprobe.d/nvidia-power.conf` and reboot.
+EOF
 }
 
 summary_snapshots_section() {
@@ -1465,6 +1489,7 @@ saves it next to yours as .pacnew. Merge those right after the upgrade with
 \`sudo pacdiff\`, before you reboot: an unmerged file in /etc/pam.d can stop
 turnstile, and with it PipeWire, from starting at login.
 EOF
+    if [[ $INSTALL_NVIDIA == yes ]] && nvidia_powers_off; then summary_nvidia_section; fi
     if [[ $INTEL_AUDIO_DSP == yes ]]; then summary_sound_section; fi
     if [[ $ENABLE_TIMESHIFT == yes ]]; then summary_snapshots_section; fi
     printf '\nThe full installation log: /var/log/artix-install/install.log\n'

@@ -123,6 +123,12 @@ else
     check "nouveau not in initramfs"           sh -c "! chroot $M lsinitcpio /boot/initramfs-linux.img | grep -q nouveau"
     # Suspend relies on it; the installer adds no hook of its own
     check "nvidia-utils' elogind sleep hook"   test -x $M/usr/lib/elogind/system-sleep/nvidia
+    if [[ ${OTHER_GPU-no} == yes ]]; then
+        check "prime-run installed"            test -x $M/usr/local/bin/prime-run
+        check "NVIDIA GPU powers off when idle" grep -qx 'options nvidia NVreg_DynamicPowerManagement=0x02' $M/etc/modprobe.d/nvidia-power.conf
+        check "udev rule for NVIDIA runtime PM" grep -q 'ATTR{power/control}="auto"' $M/etc/udev/rules.d/80-nvidia-pm.rules
+        check "summary explains turning it off" grep -q 'rm /etc/modprobe.d/nvidia-power.conf' "$H/artix-install-summary.md"
+    fi
 fi
 check "older HDA driver instead of SOF"        grep -qx 'options snd-intel-dspcfg dsp_driver=1' $M/etc/modprobe.d/legacy-hda.conf
 check "summary saved in the user's home"       test -s "$M/home/$USER_NAME/artix-install-summary.md"

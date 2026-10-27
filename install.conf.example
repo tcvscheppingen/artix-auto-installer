@@ -34,6 +34,7 @@
 #CPU_VENDOR=                # intel/amd, empty = detect from /proc/cpuinfo
 #NVIDIA_ID=                  # PCI device ID (e.g. 0x2560), empty = detect
 #INTEL_AUDIO_DSP=no          # yes = act as if the Intel sound chip has a DSP
+#OTHER_GPU=no                # yes = act as if an Intel/AMD GPU sits next to the NVIDIA GPU (hybrid laptop)
 #PACMAN_CHROOT_OPTS=         # extra pacman options in the chroot (containers: --disable-sandbox)
 #CRYPT_NAME=cryptroot        # name of the unlocked root, /dev/mapper/NAME
 #TEST_IN_CONTAINER=no        # tests only: don't touch the host's EFI entries, clock or keymap
