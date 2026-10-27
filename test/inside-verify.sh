@@ -121,6 +121,8 @@ else
     check "nvidia module built for linux-lts"  sh -c "find $M/usr/lib/modules/*-lts/ -name 'nvidia.ko*' | grep -q ."
     check "no kms hook (keeps nouveau out)"    sh -c "! grep -E '^HOOKS=.* kms ' $M/etc/mkinitcpio.conf"
     check "nouveau not in initramfs"           sh -c "! chroot $M lsinitcpio /boot/initramfs-linux.img | grep -q nouveau"
+    # Suspend relies on it; the installer adds no hook of its own
+    check "nvidia-utils' elogind sleep hook"   test -x $M/usr/lib/elogind/system-sleep/nvidia
 fi
 check "older HDA driver instead of SOF"        grep -qx 'options snd-intel-dspcfg dsp_driver=1' $M/etc/modprobe.d/legacy-hda.conf
 check "summary saved in the user's home"       test -s "$M/home/$USER_NAME/artix-install-summary.md"
@@ -133,7 +135,7 @@ check "install log has no user password"       sh -c "! grep -qF '$USER_PASSWORD
 echo "== Desktop: $DESKTOP"
 check "no rice sudoers rule left"              test ! -e $M/etc/sudoers.d/99-artix-install
 check "no DisableSandbox left in pacman.conf"  sh -c "! grep -q '^DisableSandbox' $M/etc/pacman.conf"
-if [[ $DESKTOP == none ]]; then
+if [[ $DESKTOP == none && $ENABLE_TIMESHIFT == no ]]; then
     check "no GTK installed"                   sh -c "! chroot $M pacman -Q gtk3"
     check "no display manager enabled"         sh -c "! ls $M/etc/dinit.d/boot.d/ | grep -qE '^(sddm|lightdm)$'"
 else
