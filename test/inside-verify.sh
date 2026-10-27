@@ -89,7 +89,7 @@ if [[ $ENABLE_TIMESHIFT == yes ]]; then
     ROOT_UUID=$(blkid -s UUID -o value /dev/mapper/$MAP)
     check "timeshift snapshots the root fs"    grep -q "\"backup_device_uuid\" : \"$ROOT_UUID\"" $TS
     check "timeshift: daily, no setup wizard"  sh -c "grep -q '\"schedule_daily\" : \"true\"' $TS && grep -q '\"do_first_run\" : \"false\"' $TS"
-    check "timeshift excludes the home folder" grep -qF "\"/home/$USER_NAME/**\"" $TS
+    check "timeshift excludes every home folder" grep -qF '"/home/**"' $TS
     check "timeshift hourly cron job"          grep -q 'root timeshift --check --scripted' $M/etc/cron.d/timeshift-hourly
     check "pacman hook snapshots before upgrades" grep -qx 'When = PreTransaction' $M/etc/pacman.d/hooks/00-timeshift.hook
     # timeshift never removes a snapshot with a comment

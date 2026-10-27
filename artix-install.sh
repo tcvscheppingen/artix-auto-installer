@@ -74,18 +74,17 @@ ask() {
 # ask_yes_no VAR "Question" default(y|n) -> VAR is "yes" or "no"
 ask_yes_no() {
     local -n _yn=$1
-    local question=$2 default=$3 answer hint
-    case ${_yn-} in
-        y|Y|yes|YES|true|1) _yn=yes; return 0 ;;
-        n|N|no|NO|false|0)  _yn=no;  return 0 ;;
+    local question=$2 default=$3 preset=${_yn-} answer hint
+    case ${preset,,} in
+        y|yes|true|1) _yn=yes; return 0 ;;
+        n|no|false|0) _yn=no;  return 0 ;;
     esac
     [[ $default == y ]] && hint="Y/n" || hint="y/N"
     while :; do
         read -r -p "$question [$hint]: " answer
-        answer=${answer:-$default}
-        case $answer in
-            y|Y|yes|Yes) _yn=yes; return 0 ;;
-            n|N|no|No)   _yn=no;  return 0 ;;
+        case ${answer:-$default} in
+            [yY]|[yY][eE][sS]) _yn=yes; return 0 ;;
+            [nN]|[nN][oO])     _yn=no;  return 0 ;;
         esac
         warn "Please answer y or n."
     done
@@ -122,7 +121,10 @@ ask_choice() {
 ask_password() {
     local -n _pw=$1
     local what=$2 min=${3:-1} p1 p2
-    [[ -n ${_pw-} ]] && return 0
+    if [[ -n ${_pw-} ]]; then
+        (( ${#_pw} >= min )) || die "$1 is shorter than $min characters"
+        return 0
+    fi
     while :; do
         read -r -s -p "$what: " p1; echo
         read -r -s -p "Repeat $what: " p2; echo
@@ -325,6 +327,9 @@ desktop_packages() {
     esac
 }
 
+# The name of the rice repository for sway or dwm
+rice_name() { if [[ $1 == sway ]]; then echo SARBS; else echo DARBS; fi; }
+
 desktop_label() {
     case $1 in
         none)     echo "none (boots to a TTY)" ;;
@@ -334,9 +339,9 @@ desktop_label() {
         lxqt)     echo "LXQt, LightDM login screen" ;;
         sway|dwm)
             case $DESKTOP_LOGIN in
-                tty)  echo "$1 ($([[ $1 == sway ]] && echo SARBS || echo DARBS)), starts on TTY1 login" ;;
-                dm)   echo "$1 ($([[ $1 == sway ]] && echo SARBS || echo DARBS)), LightDM login screen" ;;
-                none) echo "$1 ($([[ $1 == sway ]] && echo SARBS || echo DARBS)), start it yourself" ;;
+                tty)  echo "$1 ($(rice_name "$1")), starts on TTY1 login" ;;
+                dm)   echo "$1 ($(rice_name "$1")), LightDM login screen" ;;
+                none) echo "$1 ($(rice_name "$1")), start it yourself" ;;
             esac ;;
     esac
 }
@@ -375,6 +380,74 @@ EOF
     ok "$(desktop_label "$DESKTOP"); enabled: dbus turnstiled bluetoothd $dm; PipeWire for $USER_NAME"
 }
 
+# Rsync snapshots in /timeshift: daily and before every pacman upgrade. Run it
+# after every other pacman run, so the hook doesn't take snapshots during the
+# installation.
+setup_timeshift() {
+    # timeshift depends on cronie, which runs its scheduled snapshots
+    chroot_pacman -S --needed --noconfirm timeshift cronie cronie-dinit
+    enable_service cronie
+    # What timeshift's setup wizard writes: rsync snapshots of the root file
+    # system in /timeshift, without the home folders. Restores skip them too,
+    # so they never roll back anyone's files, also of users added later. Plus
+    # the package cache, which pacman can download again.
+    cat > "$MNT/etc/timeshift/timeshift.json" << EOF
+{
+  "backup_device_uuid" : "$ROOT_FS_UUID",
+  "parent_device_uuid" : "$LUKS_UUID",
+  "do_first_run" : "false",
+  "btrfs_mode" : "false",
+  "include_btrfs_home_for_backup" : "false",
+  "include_btrfs_home_for_restore" : "false",
+  "stop_cron_emails" : "true",
+  "schedule_monthly" : "false",
+  "schedule_weekly" : "false",
+  "schedule_daily" : "true",
+  "schedule_hourly" : "false",
+  "schedule_boot" : "false",
+  "count_monthly" : "2",
+  "count_weekly" : "3",
+  "count_daily" : "5",
+  "count_hourly" : "6",
+  "count_boot" : "5",
+  "exclude" : [
+    "/root/**",
+    "/home/**",
+    "/var/cache/pacman/pkg/**"
+  ],
+  "exclude-apps" : [
+  ]
+}
+EOF
+    # The cron job timeshift writes itself once it has run: every hour it
+    # checks whether the daily snapshot is due
+    cat > "$MNT/etc/cron.d/timeshift-hourly" << 'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+MAILTO=""
+
+0 * * * * root timeshift --check --scripted
+EOF
+    # Tagged daily, so they count towards the daily snapshots and timeshift
+    # removes them after 5 days. No --comments: timeshift never removes a
+    # snapshot with a comment. When the snapshot fails (a full disk), pacman
+    # warns and upgrades anyway.
+    mkdir -p "$MNT/etc/pacman.d/hooks"
+    cat > "$MNT/etc/pacman.d/hooks/00-timeshift.hook" << 'EOF'
+# Snapshot before upgrades (artix-install.sh). Remove this file to stop them.
+[Trigger]
+Operation = Upgrade
+Type = Package
+Target = *
+
+[Action]
+Description = Taking a Timeshift snapshot before the upgrade...
+When = PreTransaction
+Exec = /usr/bin/timeshift --create --scripted --tags D
+EOF
+    ok "Timeshift: a daily snapshot and one before every pacman upgrade, kept for 5 days"
+}
+
 # Undoes what install_rice changes only for the time the rice script runs
 rice_cleanup() {
     rm -f "$MNT$RICE_SUDOERS"
@@ -387,8 +460,8 @@ rice_cleanup() {
 # way the user would run it after the first boot
 install_rice() {
     local name repo dir rc=0
-    if [[ $DESKTOP == sway ]]; then name=SARBS; repo=${SARBS_REPO:-$SARBS_URL}
-    else                           name=DARBS; repo=${DARBS_REPO:-$DARBS_URL}; fi
+    name=$(rice_name "$DESKTOP")
+    if [[ $name == SARBS ]]; then repo=${SARBS_REPO:-$SARBS_URL}; else repo=${DARBS_REPO:-$DARBS_URL}; fi
     dir=/home/$USER_NAME/$name
     rm -rf "${MNT:?}$dir"
     if [[ -d $repo ]]; then
@@ -678,7 +751,7 @@ done
 
 while :; do
     ask USER_NAME "User name"
-    if [[ $USER_NAME =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && [[ $USER_NAME != root ]]; then break; fi
+    if [[ $USER_NAME =~ ^[a-z][a-z0-9_-]{0,31}$ ]] && [[ $USER_NAME != root ]]; then break; fi
     warn "Use lower-case letters, digits, '-' and '_', starting with a letter (not 'root')."
     USER_NAME=""
 done
@@ -721,7 +794,14 @@ info ""
 info "Timeshift takes a snapshot of the system (not your home folder) every day"
 info "and before every pacman upgrade, so you can roll back an update that breaks"
 info "something. The snapshots are kept on the same disk, in /timeshift."
-ask_yes_no ENABLE_TIMESHIFT "Set up Timeshift snapshots?" y
+# The first snapshot is as big as the system, and timeshift doesn't check
+# the free space for it
+if (( DISK_SIZE >= 64 * 1024 ** 3 )); then
+    ask_yes_no ENABLE_TIMESHIFT "Set up Timeshift snapshots?" y
+else
+    info "The first snapshot is as big as the system, so on this disk it can fill it up."
+    ask_yes_no ENABLE_TIMESHIFT "Set up Timeshift snapshots?" n
+fi
 
 if (( ${#NVIDIA_PKGS[@]} > 0 )); then
     info ""
@@ -1002,16 +1082,17 @@ EOF
 ok "$TIMEZONE, $LOCALE, $KEYMAP, $HOST_NAME"
 
 step "Initramfs with the encrypt hook"
-# keyboard and keymap before encrypt, for the passphrase prompt
-hooks="base udev autodetect microcode modconf kms keyboard keymap consolefont block encrypt filesystems fsck"
-for h in $hooks; do
-    [[ -e $MNT/usr/lib/initcpio/install/$h ]] || hooks=${hooks/ $h / }
+# keyboard and keymap before encrypt, for the passphrase prompt. Only the
+# hooks this mkinitcpio has.
+hooks=()
+for h in base udev autodetect microcode modconf kms keyboard keymap consolefont block encrypt filesystems fsck; do
+    # kms would put nouveau in the initramfs, before nvidia-utils' blacklist applies
+    [[ $h == kms && $INSTALL_NVIDIA == yes ]] && continue
+    [[ -e $MNT/usr/lib/initcpio/install/$h ]] && hooks+=("$h")
 done
-# kms would put nouveau in the initramfs, before nvidia-utils' blacklist applies
-[[ $INSTALL_NVIDIA == yes ]] && hooks=${hooks/ kms / }
-sed -i "s/^HOOKS=.*/HOOKS=($hooks)/" "$MNT/etc/mkinitcpio.conf"
+sed -i "s/^HOOKS=.*/HOOKS=(${hooks[*]})/" "$MNT/etc/mkinitcpio.conf"
 grep -q '^HOOKS=(.*encrypt' "$MNT/etc/mkinitcpio.conf" || die "Couldn't set HOOKS in mkinitcpio.conf"
-info "HOOKS=($hooks)"
+info "HOOKS=(${hooks[*]})"
 in_chroot mkinitcpio -P
 ok "Initramfs built"
 
@@ -1133,71 +1214,9 @@ esac
 
 # --- 10. Optional: Timeshift ---
 
-# After every other pacman run, so the hook doesn't take snapshots during the
-# installation
 if [[ $ENABLE_TIMESHIFT == yes ]]; then
     step "Setting up Timeshift snapshots"
-    # timeshift depends on cronie, which runs its scheduled snapshots
-    chroot_pacman -S --needed --noconfirm timeshift cronie cronie-dinit
-    enable_service cronie
-    # What timeshift's setup wizard writes: rsync snapshots of the root file
-    # system in /timeshift, without the home folders. Plus the package cache,
-    # which pacman can download again.
-    cat > "$MNT/etc/timeshift/timeshift.json" << EOF
-{
-  "backup_device_uuid" : "$ROOT_FS_UUID",
-  "parent_device_uuid" : "$LUKS_UUID",
-  "do_first_run" : "false",
-  "btrfs_mode" : "false",
-  "include_btrfs_home_for_backup" : "false",
-  "include_btrfs_home_for_restore" : "false",
-  "stop_cron_emails" : "true",
-  "schedule_monthly" : "false",
-  "schedule_weekly" : "false",
-  "schedule_daily" : "true",
-  "schedule_hourly" : "false",
-  "schedule_boot" : "false",
-  "count_monthly" : "2",
-  "count_weekly" : "3",
-  "count_daily" : "5",
-  "count_hourly" : "6",
-  "count_boot" : "5",
-  "exclude" : [
-    "/root/**",
-    "/home/$USER_NAME/**",
-    "/var/cache/pacman/pkg/**"
-  ],
-  "exclude-apps" : [
-  ]
-}
-EOF
-    # The cron job timeshift writes itself once it has run: every hour it
-    # checks whether the daily snapshot is due
-    cat > "$MNT/etc/cron.d/timeshift-hourly" << 'EOF'
-SHELL=/bin/bash
-PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-MAILTO=""
-
-0 * * * * root timeshift --check --scripted
-EOF
-    # Tagged daily, so they count towards the daily snapshots and timeshift
-    # removes them after 5 days. No --comments: timeshift never removes a
-    # snapshot with a comment. When the snapshot fails (a full disk), pacman
-    # warns and upgrades anyway.
-    mkdir -p "$MNT/etc/pacman.d/hooks"
-    cat > "$MNT/etc/pacman.d/hooks/00-timeshift.hook" << 'EOF'
-# Snapshot before upgrades (artix-install.sh). Remove this file to stop them.
-[Trigger]
-Operation = Upgrade
-Type = Package
-Target = *
-
-[Action]
-Description = Taking a Timeshift snapshot before the upgrade...
-When = PreTransaction
-Exec = /usr/bin/timeshift --create --scripted --tags D
-EOF
-    ok "Timeshift: a daily snapshot and one before every pacman upgrade, kept for 5 days"
+    setup_timeshift
 fi
 
 # --- 11. Summary ---
@@ -1239,7 +1258,7 @@ case $DESKTOP in
         case $DESKTOP_LOGIN in
             tty)  login_step="Log in as $USER_NAME on TTY1; $DESKTOP starts by itself." ;;
             dm)   login_step="Log in as $USER_NAME on the login screen ($DESKTOP session)." ;;
-            none) login_step="Log in as $USER_NAME and start $DESKTOP (see the README in ~/$([[ $DESKTOP == sway ]] && echo SARBS || echo DARBS))." ;;
+            none) login_step="Log in as $USER_NAME and start $DESKTOP (see the README in ~/$(rice_name "$DESKTOP"))." ;;
         esac
         login_step+=" Connect to Wi-Fi with the network icon in the bar, or \`nmtui\`."
         desktop_step="" ;;
@@ -1283,7 +1302,7 @@ Installed on $(date '+%F %R %Z') with artix-install.sh $SCRIPT_VERSION.
 - Keyboard in X: $(if [[ -n $X11_LAYOUT ]]; then echo "$X11_LAYOUT${X11_VARIANT:+ ($X11_VARIANT)}, in /etc/X11/xorg.conf.d/00-keyboard.conf"; else echo "not set (no X layout known for $KEYMAP); set it in /etc/X11/xorg.conf.d/00-keyboard.conf"; fi)
 - Time zone: $TIMEZONE
 - Mirrors: ranked at install time; the stock list is /etc/pacman.d/mirrorlist.stock
-- Desktop: $(desktop_label "$DESKTOP")$([[ $DESKTOP == sway || $DESKTOP == dwm ]] && echo "; the rice is in ~/$([[ $DESKTOP == sway ]] && echo SARBS || echo DARBS)")
+- Desktop: $(desktop_label "$DESKTOP")$([[ $DESKTOP == sway || $DESKTOP == dwm ]] && echo "; the rice is in ~/$(rice_name "$DESKTOP")")
 - AUR: $([[ $ENABLE_AUR == yes ]] && echo "yay installed. AUR packages are unofficial, review their PKGBUILDs ($AUR_WIKI)" || echo "not enabled")
 
 ## Accounts
