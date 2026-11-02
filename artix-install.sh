@@ -32,6 +32,7 @@ readonly LOG=/tmp/artix-install.log
 readonly AUR_WIKI="https://wiki.archlinux.org/title/Arch_User_Repository"
 readonly DARBS_URL="https://github.com/tcvscheppingen/DARBS"
 readonly SARBS_URL="https://github.com/tcvscheppingen/SARBS"
+readonly PENROSEWM_URL="https://github.com/tcvscheppingen/penrosewm"
 # Lets the user's rice script use sudo without a password during the install
 readonly RICE_SUDOERS=/etc/sudoers.d/99-artix-install
 
@@ -828,7 +829,8 @@ ask_desktop() {
             "xfce:XFCE (LightDM login screen)" \
             "lxqt:LXQt (LightDM login screen)" \
             "sway:sway, my Wayland setup (SARBS)" \
-            "dwm:dwm, my X11 setup (DARBS)"
+            "dwm:dwm, my X11 setup (DARBS)" \
+            "penrosewm:penrosewm, my own window manager written in Rust with Penrose"
         [[ $DESKTOP == sway && $INSTALL_NVIDIA == yes ]] || break
         # sway refuses to start when NVIDIA's driver is loaded
         warn "sway doesn't support NVIDIA's driver and won't start with it."
@@ -842,7 +844,7 @@ ask_desktop() {
         DESKTOP="" SWAY_WITHOUT_NVIDIA=""
         info "Choose another desktop then."
     done
-    if [[ $DESKTOP == sway || $DESKTOP == dwm ]]; then
+    if [[ $DESKTOP == sway || $DESKTOP == dwm || $DESKTOP = penrosewm ]]; then
         ask_choice DESKTOP_LOGIN "Start $DESKTOP" dm \
             "tty:automatically when you log in on TTY1" \
             "dm:from a minimal graphical login screen (LightDM)" \
@@ -1229,7 +1231,7 @@ install_yay() {
 install_desktop() {
     case $DESKTOP in
         plasma|cinnamon|xfce|lxqt) install_desktop_environment ;;
-        sway|dwm)                  install_rice ;;
+        sway|dwm|penrosewm)                  install_rice ;;
     esac
 }
 
@@ -1334,7 +1336,7 @@ summary_login_steps() {
             echo "4. Install a desktop, for example DARBS: $DARBS_URL or SARBS: $SARBS_URL" ;;
         plasma|cinnamon|xfce|lxqt)
             echo "Log in as $USER_NAME on the login screen. Connect to Wi-Fi with the network icon in the panel." ;;
-        sway|dwm)
+        sway|dwm|penrosewm)
             case $DESKTOP_LOGIN in
                 tty)  printf '%s' "Log in as $USER_NAME on TTY1; $DESKTOP starts by itself." ;;
                 dm)   printf '%s' "Log in as $USER_NAME on the login screen ($DESKTOP session)." ;;
@@ -1464,7 +1466,7 @@ Installed on $(date '+%F %R %Z') with artix-install.sh $SCRIPT_VERSION.
 - Keyboard in X: $(if [[ -n $X11_LAYOUT ]]; then echo "$X11_LAYOUT${X11_VARIANT:+ ($X11_VARIANT)}, in /etc/X11/xorg.conf.d/00-keyboard.conf"; else echo "not set (no X layout known for $KEYMAP); set it in /etc/X11/xorg.conf.d/00-keyboard.conf"; fi)
 - Time zone: $TIMEZONE
 - Mirrors: ranked at install time; the stock list is /etc/pacman.d/mirrorlist.stock
-- Desktop: $(desktop_label "$DESKTOP")$([[ $DESKTOP == sway || $DESKTOP == dwm ]] && echo "; the rice is in ~/$(rice_name "$DESKTOP")")
+- Desktop: $(desktop_label "$DESKTOP")$([[ $DESKTOP == sway || $DESKTOP == dwm || $DESKTOP == penrosewm ]] && echo "; the rice is in ~/$(rice_name "$DESKTOP")")
 - AUR: $([[ $ENABLE_AUR == yes ]] && echo "yay installed. AUR packages are unofficial, review their PKGBUILDs ($AUR_WIKI)" || echo "not enabled")
 
 ## Accounts
