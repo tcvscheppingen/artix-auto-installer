@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Runs inside the artix-live-sim container after the boot stage: copies the
-# screenshots of the login screen and the desktop that boot-checks.sh saved
-# off the disk, for the report.
+# Copies the screenshots boot-checks.sh saved off the test disk
 set -Eeuo pipefail
 # shellcheck source=/dev/null
 source /src/test/test.conf

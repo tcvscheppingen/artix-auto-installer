@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Runs inside the artix-live-sim container: opens the installed disk and
-# checks the result. Also adds a serial getty (test only) for the boot test.
+# Checks the installed disk, then prepares it for the boot test
 set -Eeuo pipefail
 # shellcheck source=/dev/null
 source /src/test/test.conf
@@ -8,8 +7,6 @@ source /src/test/test.conf
 source /src/test/disk.sh
 M=/mnt
 H=$M/home/$USER_NAME
-# The desktop that inside-install.sh installed, and whether with NVIDIA's
-# driver (no when the run includes sway, see run-container-test.sh)
 DESKTOP=$(cat /out/desktop.txt 2> /dev/null || echo none)
 NVIDIA=$(cat /out/nvidia.txt 2> /dev/null || echo yes)
 
@@ -75,8 +72,7 @@ for s in NetworkManager ufw; do
 done
 check "time sync service enabled"              sh -c "ls $M/etc/dinit.d/boot.d/ | grep -q chrony"
 check "pacdiff installed (pacman-contrib)"     chroot $M pacman -Q pacman-contrib
-# ufw-dinit runs ufw enable at boot and ufw disable at shutdown, which
-# writes ENABLED=no; so ENABLED=yes only until the first boot (its log)
+# ufw disable at shutdown writes ENABLED=no, so check its log after a boot
 check "ufw service enables ufw at boot"        grep -qE '^command\s*=\s*/usr/bin/ufw enable' $M/etc/dinit.d/ufw
 if [[ ! -e $M/var/log/dinit/ufw.log ]]; then
     check "ufw ENABLED=yes"                    grep -q '^ENABLED=yes' $M/etc/ufw/ufw.conf
@@ -105,14 +101,12 @@ if [[ $ENABLE_AUR == yes ]]; then
 else
     check "no yay (AUR not enabled)"           sh -c "! chroot $M pacman -Q yay"
 fi
-# By name: pacman -Q also matches what a package provides, and Artix's
-# artix-archlinux-support provides a dummy systemd (Cinnamon pulls it in)
+# By name: artix-archlinux-support provides a dummy systemd
 check "no systemd installed"                   sh -c "! chroot $M pacman -Qq | grep -qxE 'systemd|systemd-libs'"
 check "mesa not installed explicitly"          sh -c "! chroot $M pacman -Qeq mesa"
 if [[ $NVIDIA == no ]]; then
     check "no NVIDIA driver (none in this run)" sh -c "! chroot $M pacman -Q nvidia-open-dkms"
 elif [[ $DESKTOP == sway ]]; then
-    # sway doesn't support NVIDIA's driver, so the installer leaves it out
     check "no NVIDIA driver with sway"         sh -c "! chroot $M pacman -Q nvidia-open-dkms"
     check "installer warned about sway + NVIDIA" grep -q "sway doesn't support NVIDIA's driver" /logs/install.log
 else
@@ -199,7 +193,9 @@ case $DESKTOP in
             check "$prog built and installed"  test -x $M/usr/local/bin/$prog
         done
         check "st runs"                        sh -c "chroot $M /usr/local/bin/st -v 2>&1 | grep -qE 'st [0-9]'"
-        check "desktop packages installed"     chroot $M pacman -Q xorg-server xorg-xinit xorg-xmodmap rust pipewire wireplumber dunst librewolf turnstile
+        check "desktop packages installed"     chroot $M pacman -Q xorg-server xorg-xinit xorg-xmodmap pipewire wireplumber dunst librewolf turnstile
+        check "Rust from rustup, not pacman"   sh -c "test -x $H/.cargo/bin/rustc && ! chroot $M pacman -Q rust > /dev/null 2>&1"
+        check "cargo on the login PATH"        grep -qs '.cargo/env' "$H/.bash_profile"
         check "xss-lock installed from [extra]" chroot $M pacman -Q xss-lock
         check "[extra] enabled"                grep -q '^\[extra\]' $M/etc/pacman.conf
         for svc in dbus turnstiled bluetoothd NetworkManager lightdm; do
@@ -239,7 +235,7 @@ esac
 echo "== Result: $pass passed, $fail failed"
 } 2>&1 | tee /logs/verify.log
 
-# Test only: a login on the serial port, and the boot check script
+# Test only: a serial login and the boot checks
 cat > $M/etc/dinit.d/getty@ttyS0 << 'GETTY'
 @include /usr/lib/dinit.d/getty
 inittab-line = ttyS0
@@ -247,14 +243,14 @@ GETTY
 ln -sfn /etc/dinit.d/getty@ttyS0 $M/etc/dinit.d/boot.d/getty@ttyS0
 install -m 755 /src/test/boot-checks.sh $M/usr/local/bin/boot-checks.sh
 echo "$DESKTOP" > $M/etc/artix-test-desktop
+# Test only: a snapshot during the boot test blocks timeshift --list and can
+# grow QEMU until Docker's OOM killer stops it
+rm -f $M/etc/cron.d/timeshift-hourly
 
-# Test only: the boot test logs in through the display manager's greeter
-# with xdotool, and takes screenshots of the greeter and the desktop with
-# maim. No autologin, so the login screen itself is tested.
+# Test only: no autologin, the boot test logs in through the greeter
 rm -f $M/etc/sddm.conf.d/90-test-autologin.conf $M/etc/lightdm/lightdm.conf.d/90-test-autologin.conf
 if [[ $DESKTOP != none ]]; then
     # artix-chroot: pacman needs /proc, /dev and resolv.conf
-    # fastfetch: the dwm, sway and penrose screenshots show it in a terminal
     extra=(); [[ $DESKTOP == dwm || $DESKTOP == sway || $DESKTOP == penrose ]] && extra=(fastfetch)
     artix-chroot $M pacman -S --needed --noconfirm --disable-sandbox maim xdotool "${extra[@]}" > /dev/null
     artix-chroot $M gpgconf --homedir /etc/pacman.d/gnupg --kill all &> /dev/null || true

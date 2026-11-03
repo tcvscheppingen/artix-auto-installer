@@ -35,7 +35,7 @@ readonly AUR_WIKI="https://wiki.archlinux.org/title/Arch_User_Repository"
 readonly DARBS_URL="https://github.com/tcvscheppingen/DARBS"
 readonly SARBS_URL="https://github.com/tcvscheppingen/SARBS"
 readonly PENROSE_URL="https://github.com/tcvscheppingen/penrosewm"
-# Lets the user's rice script use sudo without a password during the install
+# Passwordless sudo while the rice script runs
 readonly RICE_SUDOERS=/etc/sudoers.d/99-artix-install
 
 # --- Output helpers ---
@@ -46,12 +46,11 @@ else
     C_RED=''; C_GRN=''; C_YLW=''; C_BLU=''; C_RST=''
 fi
 
-# With the time since the start, to see what takes long
 step() { printf '\n%s==> %s%s  [%02d:%02d]\n' "$C_BLU" "$*" "$C_RST" $((SECONDS / 60)) $((SECONDS % 60)); }
 info() { printf '    %s\n' "$*"; }
 ok()   { printf '%s  ✓ %s%s\n' "$C_GRN" "$*" "$C_RST"; }
 warn() { printf '%s  ! %s%s\n' "$C_YLW" "$*" "$C_RST" >&2; }
-# FAILED_AT: die explains the problem itself, see on_error
+# Clears FAILED_AT: die's message already says what went wrong
 die()  { printf '%sERROR: %s%s\n' "$C_RED" "$*" "$C_RST" >&2; FAILED_AT=""; exit 1; }
 
 # --- Prompt helpers: they only ask when the variable is still empty ---
@@ -93,8 +92,7 @@ ask_yes_no() {
     done
 }
 
-# ask_choice VAR "Question" default "name:description"... -> VAR is one of
-# the names. The answer can be the name or its number in the list.
+# ask_choice VAR "Question" default "name:description"... (answer: name or number)
 ask_choice() {
     local -n _ch=$1
     local var=$1 question=$2 default=$3 answer opt i=0
@@ -151,7 +149,6 @@ part_name() {
 
 in_chroot() { artix-chroot "$MNT" "$@"; }
 
-# PACMAN_CHROOT_OPTS: --disable-sandbox in containers
 # shellcheck disable=SC2086
 chroot_pacman() { in_chroot pacman $PACMAN_CHROOT_OPTS "$@"; }
 
@@ -163,8 +160,7 @@ enable_service() {
     ENABLED_SERVICES+=("$svc")
 }
 
-# The X layout (and variant) for a console keymap, empty when unknown. X
-# doesn't read /etc/vconsole.conf; on systemd systems localectl writes this.
+# "layout [variant]" in X for a console keymap; X doesn't read vconsole.conf
 x11_layout() {
     case $1 in
         us)                   echo "us" ;;
@@ -192,8 +188,7 @@ x11_layout() {
     esac
 }
 
-# KEY=VALUE in the new system's /etc/default/grub, also when the setting is
-# there commented out
+# Also replaces a commented-out setting
 grub_set() {
     sed -i "/^#\?$1=/d" "$MNT/etc/default/grub"
     echo "$1=$2" >> "$MNT/etc/default/grub"
@@ -217,8 +212,7 @@ wait_for_partitions() {
     done
 }
 
-# The stock list isn't sorted by distance and has dead mirrors. -w drops
-# the ones that don't answer within 5 s.
+# The stock list has dead mirrors; -w drops those
 rank_mirrors() {
     local list=/etc/pacman.d/mirrorlist tmp count
     if ! command -v rankmirrors > /dev/null; then
@@ -240,11 +234,8 @@ rank_mirrors() {
     ok "$count of $(grep -c '^[[:space:]]*Server' "$list.stock") mirrors answered, fastest: $(awk '/^Server/ {sub(/^[a-z]+:\/\//, "", $3); sub(/\/.*/, "", $3); print $3; exit}' "$list")"
 }
 
-# Sets NVIDIA_ID (PCI device ID of the first NVIDIA GPU), OTHER_GPU (yes: an
-# Intel/AMD GPU next to it, a hybrid laptop; can be preset for tests), GPU_PKGS (Vulkan and VA-API for
-# the Intel/AMD GPUs, for the desktop environments) and NVIDIA_PKGS. By generation:
-# Turing and newer (>= 0x1e00) use the open kernel modules, Maxwell to Volta
-# (>= 0x1340) the 580xx branch, and Kepler and older have no packaged driver.
+# Sets NVIDIA_ID, OTHER_GPU (hybrid laptop), GPU_PKGS and NVIDIA_PKGS.
+# Turing+ (>= 0x1e00): open modules; Maxwell-Volta (>= 0x1340): 580xx; older: none.
 detect_gpus() {
     local dev class vendor id
     NVIDIA_PKGS=()
@@ -262,7 +253,6 @@ detect_gpus() {
             [[ " ${GPU_PKGS[*]} " == *" vulkan-intel "* ]] || GPU_PKGS+=(vulkan-intel intel-media-driver)
         elif [[ $vendor == 0x1002 ]]; then
             OTHER_GPU=yes
-            # AMD's VA-API driver is part of mesa
             [[ " ${GPU_PKGS[*]} " == *" vulkan-radeon "* ]] || GPU_PKGS+=(vulkan-radeon)
         fi
     done
@@ -274,13 +264,8 @@ detect_gpus() {
     fi
 }
 
-# Intel audio with a DSP (PCI class 0x040100 or 0x040380; plain HDA is
-# 0x040300) can get the SOF driver; the kernel picks SOF when the laptop has
-# digital microphones. Sets INTEL_AUDIO_DSP, AUDIO_DRIVER (the driver the
-# live ISO uses) and SOF_FAILED: SOF's firmware is on the live ISO, but no
-# sound device with playback came up. Without the firmware on the ISO that
-# says nothing, and SOF can also fail later (only PipeWire shows a "Dummy
-# Output"), so this only catches the clear failures.
+# Intel audio with a DSP (class 0x040100/0x040380) may use SOF. SOF_FAILED:
+# SOF's firmware is on the ISO but no playback device came up.
 detect_audio() {
     local dev class vendor
     AUDIO_DRIVER=""
@@ -302,10 +287,8 @@ detect_audio() {
     return 0
 }
 
-# The packages of a desktop environment, without the GPU drivers. turnstile
-# starts the user's own dinit at login, which runs PipeWire (Artix has no
-# other way to start it); blocaled is the locale1 D-Bus service that the
-# desktops' keyboard settings use.
+# turnstile starts the user's dinit (and so PipeWire) at login; blocaled
+# provides locale1 for the desktops' keyboard settings
 desktop_packages() {
     local common=(
         xorg-server xorg-xwayland dbus-dinit turnstile turnstile-dinit
@@ -321,15 +304,13 @@ desktop_packages() {
                       pavucontrol blueman lightdm lightdm-dinit lightdm-gtk-greeter ;;
         xfce)     printf '%s\n' "${common[@]}" xfce4 xfce4-goodies gnome-keyring pavucontrol network-manager-applet \
                       blueman lightdm lightdm-dinit lightdm-gtk-greeter ;;
-        # The lxqt group has openbox and pavucontrol-qt; LXQt needs an icon
-        # theme of its own, and xscreensaver to lock the screen
+        # LXQt has no icon theme or screen locker of its own
         lxqt)     printf '%s\n' "${common[@]}" lxqt breeze-icons xscreensaver gnome-keyring network-manager-applet \
                       blueman lightdm lightdm-dinit lightdm-gtk-greeter ;;
         *)        return 1 ;;
     esac
 }
 
-# The name of the rice repository for sway, dwm or penrose
 rice_name() {
     case $1 in
         sway)    echo SARBS ;;
@@ -354,7 +335,6 @@ desktop_label() {
     esac
 }
 
-# KDE Plasma, Cinnamon, XFCE or LXQt, with their display manager
 install_desktop_environment() {
     local pkgs dm svc dir
     mapfile -t pkgs < <(desktop_packages "$DESKTOP")
@@ -377,7 +357,6 @@ user-session=$DESKTOP
 EOF
     fi
     for svc in dbus turnstiled bluetoothd "$dm"; do enable_service "$svc"; done
-    # PipeWire as the user's own services, started by turnstile at login
     dir=/home/$USER_NAME/.config/dinit.d/boot.d
     mkdir -p "$MNT$dir"
     for svc in pipewire pipewire-pulse wireplumber; do
@@ -388,7 +367,6 @@ EOF
     ok "$(desktop_label "$DESKTOP"); enabled: dbus turnstiled bluetoothd $dm; PipeWire for $USER_NAME"
 }
 
-# Undoes what install_rice changes only for the time the rice script runs
 rice_cleanup() {
     rm -f "$MNT$RICE_SUDOERS"
     # pacman.conf has no comments after a directive, so the marker is the line before
@@ -396,9 +374,7 @@ rice_cleanup() {
     return 0
 }
 
-# sway, dwm or penrose: runs SARBS's, DARBS's or penrosewm's
-# auto-rice-artix.sh as the user, the way the user would run it after the
-# first boot
+# Runs the rice's auto-rice-artix.sh as the user, as they would after first boot
 install_rice() {
     local name repo dir rc=0
     name=$(rice_name "$DESKTOP")
@@ -410,7 +386,7 @@ install_rice() {
     dir=/home/$USER_NAME/$name
     rm -rf "${MNT:?}$dir"
     if [[ -d $repo ]]; then
-        cp -a "$repo" "$MNT$dir"   # a local checkout (tests)
+        cp -a "$repo" "$MNT$dir"
         in_chroot chown -R "$USER_NAME:" "$dir"
     else
         in_chroot su - "$USER_NAME" -c "git clone --depth 1 $(printf '%q %q' "$repo" "$dir")"
@@ -422,7 +398,7 @@ install_rice() {
     if [[ $PACMAN_CHROOT_OPTS == *--disable-sandbox* ]]; then
         sed -i 's/^\[options\]$/&\n# artix-install.sh, until the rice script is done:\nDisableSandbox/' "$MNT/etc/pacman.conf"
     fi
-    # Enter answers anything else the script asks with its default
+    # Accept the defaults of anything the script asks
     in_chroot su - "$USER_NAME" -c "cd $(printf '%q' "$dir") && RICE_LOGIN=$DESKTOP_LOGIN ./auto-rice-artix.sh" < <(yes '') || rc=$?
     rice_cleanup
     (( rc == 0 )) || die "$name's auto-rice-artix.sh failed (exit code $rc)"
@@ -441,7 +417,6 @@ stop_chroot_processes() {
     sleep 1
 }
 
-# The command that failed, for the message in cleanup. die exits without it.
 FAILED_AT=""
 on_error() { FAILED_AT="line $1: $2"; }
 
@@ -482,9 +457,7 @@ parse_args() {
     done
 }
 
-# Everything that can be preset, from the config file or the environment
-# (empty = ask). The steps below share these, and what they find or create
-# (BOOT_MODE, DISK_SIZE, PART_EFI, LUKS_UUID...), as upper-case globals.
+# Empty = ask
 load_settings() {
     if [[ -n $CONFIG_FILE ]]; then
         [[ -r $CONFIG_FILE ]] || die "Can't read config file $CONFIG_FILE"
@@ -513,7 +486,7 @@ load_settings() {
     SAVE_SUMMARY=${SAVE_SUMMARY-}
     CONFIRM_WIPE=${CONFIRM_WIPE-}
     REBOOT_WHEN_DONE=${REBOOT_WHEN_DONE-}
-    # Advanced / testing
+    # Testing
     EXTRA_KERNEL_PARAMS=${EXTRA_KERNEL_PARAMS-}
     LUKS_FORMAT_OPTS=${LUKS_FORMAT_OPTS-}
     ALLOW_NO_UEFI=${ALLOW_NO_UEFI-no}
@@ -522,14 +495,11 @@ load_settings() {
     INTEL_AUDIO_DSP=${INTEL_AUDIO_DSP-no}
     OTHER_GPU=${OTHER_GPU:-no}
     PACMAN_CHROOT_OPTS=${PACMAN_CHROOT_OPTS-}
-    # A package cache that outlives the test runs, mounted in the new system
     PACMAN_CACHE_DIR=${PACMAN_CACHE_DIR-}
     CRYPT_NAME=${CRYPT_NAME:-cryptroot}
-    # yes: a container on someone's computer, so don't touch its EFI boot
-    # entries, clock or console keymap
+    # Don't touch the host's EFI entries, clock or keymap
     TEST_IN_CONTAINER=${TEST_IN_CONTAINER-no}
-    # A git URL or a local checkout of SARBS/DARBS/penrosewm (tests: a
-    # local checkout)
+    # Git URL or local checkout
     SARBS_REPO=${SARBS_REPO-}
     DARBS_REPO=${DARBS_REPO-}
     PENROSE_REPO=${PENROSE_REPO-}
@@ -538,7 +508,6 @@ load_settings() {
 start_logging() {
     : > "$LOG"
     chmod 600 "$LOG"
-    # Passwords are read with read -s, so they never reach the log
     exec > >(tee -a "$LOG") 2>&1
     trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
     trap cleanup EXIT
@@ -578,9 +547,7 @@ check_live_system() {
     ok "Required tools are present"
 }
 
-# Before the disk is touched: pacman -Syu on the live ISO replaces its kernel
-# package, which removes the running kernel's modules, so cryptsetup open
-# can't load dm_crypt later. The test container has it from the host kernel.
+# pacman -Syu on the live ISO removes the running kernel's modules
 check_dm_crypt() {
     if ! dmsetup targets 2> /dev/null | grep -q '^crypt ' && ! modprobe dm_crypt 2> /dev/null; then
         # pacman -Q linux: 7.1.8.artix1-3, uname -r: 7.1.8-artix1-3
@@ -592,7 +559,7 @@ check_dm_crypt() {
     ok "Disk encryption (dm_crypt) is available"
 }
 
-# A few tries: right after connecting, DHCP and DNS may need a moment
+# Retries: DHCP and DNS can lag right after connecting
 check_internet() {
     local try
     for try in 1 2 3; do
@@ -605,7 +572,6 @@ check_internet() {
     die "No internet connection. Connect with a cable, or Wi-Fi via connmanctl (see the guide), then run this script again."
 }
 
-# Sets CPU_VENDOR, unless preset (tests)
 detect_cpu() {
     if [[ -n $CPU_VENDOR ]]; then return 0; fi
     if grep -qm1 'GenuineIntel' /proc/cpuinfo; then
@@ -645,26 +611,21 @@ ask_disk() {
     ask DISK "Disk to install to (it will be erased)" "$default_disk"
 }
 
-# Sets PART_EFI, PART_ROOT and DISK_SIZE
 check_disk() {
     local disk_type in_use=() holder name
     [[ -b $DISK ]] || die "$DISK is not a block device."
     disk_type=$(lsblk -dno TYPE "$DISK")
     [[ $disk_type == part ]] && disk_type=partition
-    # The tests install to a loop device
     [[ $disk_type == disk || ( $disk_type == loop && $TEST_IN_CONTAINER == yes ) ]] \
         || die "$DISK is a $disk_type, not a whole disk. Choose a disk such as /dev/sda or /dev/nvme0n1, not one of its partitions."
     PART_EFI=$(part_name "$DISK" 1)
     PART_ROOT=$(part_name "$DISK" 2)
     DISK_SIZE=$(lsblk -dbno SIZE "$DISK")
     (( DISK_SIZE >= 20 * 1024 ** 3 )) || die "$DISK is smaller than 20 GiB."
-    # Mounted file systems and active swap ([SWAP]), also on its partitions
     if lsblk -no MOUNTPOINTS "$DISK" 2> /dev/null | grep -q .; then
         die "$DISK (or a partition on it) is mounted. Is this the USB stick you booted from?"
     fi
-    # An unlocked LUKS volume, LVM or RAID on the disk keeps it busy, so the new
-    # partition table wouldn't take effect. $CRYPT_NAME, left over from an
-    # earlier attempt, is closed before partitioning.
+    # A busy disk ignores the new partition table; our own $CRYPT_NAME is closed later
     for holder in /sys/class/block/"${DISK##*/}"/holders/* /sys/class/block/"${DISK##*/}"/"${DISK##*/}"*/holders/*; do
         [[ -e $holder ]] || continue
         name=$(cat "$holder/dm/name" 2> /dev/null || basename "$holder")
@@ -675,7 +636,6 @@ check_disk() {
     fi
 }
 
-# Sets KEYMAP_LOADED: whether the keymap is loaded for the passwords below
 ask_keymap() {
     info "The console keymap is also used at the disk passphrase prompt during boot."
     info "us-acentos = US international with dead keys ( ' then e = é, ' then space = ' )."
@@ -685,7 +645,7 @@ ask_keymap() {
         warn "Keymap '$KEYMAP' not found (list them with: localectl list-keymaps or ls /usr/share/kbd/keymaps/i386/*)"
         KEYMAP=""
     done
-    # Same layout for the passwords below as at the boot prompt
+    # The passwords below then use the same layout as the boot prompt
     if [[ $TEST_IN_CONTAINER != yes ]] && loadkeys "$KEYMAP" 2> /dev/null; then
         ok "Loaded keymap $KEYMAP for the rest of the installation"
         KEYMAP_LOADED=yes
@@ -751,12 +711,11 @@ ask_luks_password() {
 }
 
 ask_swap_size() {
-    # The system needs at least 16 GiB besides the swap file
     local max_swap=$(( DISK_SIZE / 1024 ** 3 - 16 ))
     info "A swap file in the encrypted root protects against out-of-memory crashes."
     while :; do
         ask SWAP_SIZE "Swap file size in GiB (0 = no swap)" "4"
-        # No leading zeros: bash reads 08 as an invalid octal number
+        # No leading zeros: bash reads 08 as octal
         if [[ $SWAP_SIZE =~ ^(0|[1-9][0-9]*)$ ]] && (( SWAP_SIZE <= max_swap )); then break; fi
         warn "Enter a whole number from 0 to $max_swap."
         SWAP_SIZE=""
@@ -775,8 +734,6 @@ ask_timeshift() {
     info "Timeshift takes a snapshot of the system (not your home folder) every day"
     info "and before every pacman upgrade, so you can roll back an update that breaks"
     info "something. The snapshots are kept on the same disk, in /timeshift."
-    # The first snapshot is as big as the system, and timeshift doesn't check
-    # the free space for it
     if (( DISK_SIZE >= 64 * 1024 ** 3 )); then
         ask_yes_no ENABLE_TIMESHIFT "Set up Timeshift snapshots?" y
     else
@@ -853,7 +810,6 @@ ask_desktop() {
             info "You change its settings and key bindings in Rust (src/main.rs) and"
             info "build it again. It has no system tray, and when it doesn't start you"
             info "fix it from the text console (see the README in ~/penrosewm)."
-            # A preset DESKTOP=penrose was chosen on purpose
             [[ -n $desktop_preset ]] && break
             penrose_sure=""
             ask_yes_no penrose_sure "Install penrose anyway?" n
@@ -863,7 +819,6 @@ ask_desktop() {
             continue
         fi
         [[ $DESKTOP == sway && $INSTALL_NVIDIA == yes ]] || break
-        # sway refuses to start when NVIDIA's driver is loaded
         warn "sway doesn't support NVIDIA's driver and won't start with it."
         info "Without it, the open nouveau driver is used for the NVIDIA GPU$([[ $OTHER_GPU == yes ]] && echo ", and sway runs on the Intel/AMD GPU")."
         ask_yes_no SWAY_WITHOUT_NVIDIA "Install sway without NVIDIA's driver?" y
@@ -949,7 +904,7 @@ init_live_keyring() {
 # --- 5. Partitioning and encryption ---
 
 partition_disk() {
-    # Leftovers from an earlier, failed run
+    # Leftovers from a failed run
     if mountpoint -q "$MNT"; then
         swapoff "$MNT/swapfile" 2> /dev/null || true
         umount -R "$MNT"
@@ -968,7 +923,6 @@ EOF
     ok "Created $PART_EFI (EFI) and $PART_ROOT (LUKS)"
 }
 
-# Sets LUKS_UUID
 encrypt_root() {
     # shellcheck disable=SC2086  # LUKS_FORMAT_OPTS is intentionally split
     printf '%s' "$LUKS_PASSWORD" | cryptsetup luksFormat --type luks2 --batch-mode \
@@ -978,7 +932,6 @@ encrypt_root() {
     ok "Encrypted, LUKS UUID $LUKS_UUID"
 }
 
-# Sets ROOT_FS_UUID
 create_file_systems() {
     mkfs.fat -F 32 -n EFI "$PART_EFI" > /dev/null
     mkfs.ext4 -q -F -L ROOT "/dev/mapper/$CRYPT_NAME"
@@ -1011,11 +964,9 @@ install_base_system() {
         chrony chrony-dinit
         ufw ufw-dinit
         sudo git vim man-db bash-completion
-        # pacdiff, to merge the .pacnew files an upgrade leaves in /etc
+        # pacdiff
         pacman-contrib
     )
-    # No mesa, Vulkan or VA-API: the desktop step installs those. The NVIDIA
-    # module needs its own userspace, nvidia-utils, which pulls in mesa.
     case $CPU_VENDOR in
         intel) packages+=(intel-ucode) ;;
         amd)   packages+=(amd-ucode) ;;
@@ -1024,9 +975,8 @@ install_base_system() {
     if [[ $INSTALL_LTS == yes ]]; then packages+=(linux-lts linux-lts-headers); fi
     if [[ $INSTALL_NVIDIA == yes ]]; then packages+=("${NVIDIA_PKGS[@]}"); fi
 
-    # -K: separate keyring for the new system
     basestrap -K "$MNT" "${packages[@]}"
-    # Make sure the new system gets the ranked list, not the package's stock one
+    # The ranked list, not the package's stock one
     cp /etc/pacman.d/mirrorlist "$MNT/etc/pacman.d/mirrorlist"
     if [[ -e /etc/pacman.d/mirrorlist.stock ]]; then
         cp /etc/pacman.d/mirrorlist.stock "$MNT/etc/pacman.d/mirrorlist.stock"
@@ -1069,7 +1019,6 @@ set_time_zone() {
     fi
 }
 
-# The chosen locale, and en_US.UTF-8 as a fallback
 set_locale() {
     local loc charset
     for loc in "$LOCALE" en_US.UTF-8; do
@@ -1082,8 +1031,6 @@ set_locale() {
     echo "LANG=$LOCALE" > "$MNT/etc/locale.conf"
 }
 
-# The console keymap, and the same layout in X. Sets X11_LAYOUT and
-# X11_VARIANT (empty when there is no X layout for the keymap).
 set_keyboard() {
     echo "KEYMAP=$KEYMAP" > "$MNT/etc/vconsole.conf"
     read -r X11_LAYOUT X11_VARIANT <<< "$(x11_layout "$KEYMAP")" || true
@@ -1109,8 +1056,7 @@ set_host_name() {
 EOF
 }
 
-# keyboard and keymap before encrypt, for the passphrase prompt. Only the
-# hooks this mkinitcpio has.
+# keyboard and keymap before encrypt, for the passphrase prompt
 build_initramfs() {
     local hooks=() h
     for h in base udev autodetect microcode modconf kms keyboard keymap consolefont block encrypt filesystems fsck; do
@@ -1133,8 +1079,7 @@ install_grub() {
     grub_set GRUB_SAVEDEFAULT true
     # Otherwise grub-mkconfig puts linux-lts first
     grub_set GRUB_TOP_LEVEL '"/boot/vmlinuz-linux"'
-    # Just the kernels and UEFI settings: no submenu, and no entry for every
-    # firmware boot option (the install USB, network boot...)
+    # No submenu, and no entry for every firmware boot option
     grub_set GRUB_DISABLE_SUBMENU y
     grub_set GRUB_DISABLE_BOOTNEXT true
 
@@ -1177,7 +1122,6 @@ EOF
     ok "/etc/modprobe.d/legacy-hda.conf"
 }
 
-# NetworkManager, time sync and the firewall: deny incoming, allow outgoing
 enable_base_services() {
     enable_service NetworkManager
     if [[ -e $MNT/etc/dinit.d/chronyd ]]; then enable_service chronyd; else enable_service chrony; fi
@@ -1190,15 +1134,11 @@ enable_base_services() {
     ok "Enabled: ${ENABLED_SERVICES[*]}"
 }
 
-# A hybrid laptop with a Turing or newer GPU: the GPU can power off when idle
-# (NVIDIA's runtime D3 needs Turing; older GPUs ignore the setting)
+# Runtime D3 needs Turing or newer
 nvidia_powers_off() { [[ $OTHER_GPU == yes ]] && (( NVIDIA_ID >= 0x1e00 )); }
 
-# DKMS builds the module while the packages install; check it did for every
-# kernel. On a hybrid laptop, add prime-run, and let a Turing or newer GPU
-# power off when idle. Suspend needs nothing: the driver saves the video
-# memory through kernel suspend notifiers, and nvidia-utils has an elogind
-# hook for resume.
+# Suspend needs no setup: the driver uses kernel suspend notifiers, and
+# nvidia-utils has an elogind resume hook
 check_nvidia_driver() {
     local kdir
     for kdir in "$MNT"/usr/lib/modules/*/; do
@@ -1207,7 +1147,7 @@ check_nvidia_driver() {
             || die "The NVIDIA module wasn't built for kernel $(basename "$kdir"); see: artix-chroot $MNT dkms status"
     done
     if [[ $OTHER_GPU == yes ]]; then
-        # What Arch's nvidia-prime package contains; Artix doesn't have it
+        # Arch's nvidia-prime, which Artix doesn't package
         cat > "$MNT/usr/local/bin/prime-run" << 'EOF'
 #!/bin/sh
 export __NV_PRIME_RENDER_OFFLOAD=1 __VK_LAYER_NV_optimus=NVIDIA_only __GLX_VENDOR_LIBRARY_NAME=nvidia
@@ -1236,8 +1176,6 @@ EOF
 
 # --- 8-10. Optional: AUR helper, desktop, Timeshift ---
 
-# Builds yay as the user, like makepkg wants, and removes go again unless the
-# user had it already
 install_yay() {
     local had_go=no yay_pkg
     # Not in /tmp: artix-chroot mounts a fresh tmpfs there for every command
@@ -1266,19 +1204,12 @@ install_desktop() {
     esac
 }
 
-# Rsync snapshots in /timeshift: daily and before every pacman upgrade. Run it
-# after every other pacman run, so the hook doesn't take snapshots during the
-# installation.
+# Run after every other pacman run, or the hook snapshots during the install
 setup_timeshift() {
-    # timeshift depends on cronie, which runs its scheduled snapshots
     chroot_pacman -S --needed --noconfirm timeshift cronie cronie-dinit
     enable_service cronie
-    # What timeshift's setup wizard writes: rsync snapshots of the root file
-    # system in /timeshift, without the home folders. Restores skip them too,
-    # so they never roll back anyone's files, also of users added later. Plus
-    # the package cache, which pacman can download again, and pacman's lock:
-    # the hook snapshots while pacman runs, and a restored lock would keep
-    # pacman from running afterwards.
+    # As the setup wizard writes it. db.lck: the hook snapshots while pacman
+    # runs, and a restored lock would block pacman.
     cat > "$MNT/etc/timeshift/timeshift.json" << EOF
 {
   "backup_device_uuid" : "$ROOT_FS_UUID",
@@ -1308,8 +1239,7 @@ setup_timeshift() {
   ]
 }
 EOF
-    # The cron job timeshift writes itself once it has run: every hour it
-    # checks whether the daily snapshot is due
+    # What timeshift writes itself after its first run
     cat > "$MNT/etc/cron.d/timeshift-hourly" << 'EOF'
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
@@ -1317,10 +1247,7 @@ MAILTO=""
 
 0 * * * * root timeshift --check --scripted
 EOF
-    # Tagged daily, so they count towards the daily snapshots and timeshift
-    # removes them after 5 days. No --comments: timeshift never removes a
-    # snapshot with a comment. When the snapshot fails (a full disk), pacman
-    # warns and upgrades anyway.
+    # Tagged daily so they expire; no --comments, timeshift never removes those
     mkdir -p "$MNT/etc/pacman.d/hooks"
     cat > "$MNT/etc/pacman.d/hooks/00-timeshift.hook" << 'EOF'
 # Snapshot before upgrades (artix-install.sh). Remove this file to stop them.
@@ -1359,7 +1286,6 @@ summary_sound_line() {
     fi
 }
 
-# Step 3 of the next steps, and step 4 without a desktop
 summary_login_steps() {
     case $DESKTOP in
         none)
@@ -1455,12 +1381,10 @@ EOF
     fi
 }
 
-# The installation summary in Markdown, with what to do next
 print_summary() {
     local kernel_pkgs=(linux) kernels
     if [[ $INSTALL_LTS == yes ]]; then kernel_pkgs+=(linux-lts); fi
     kernels=$(in_chroot pacman -Q "${kernel_pkgs[@]}" | awk '{printf "%s %s  ", $1, $2}')
-    # The backticks are escaped so the heredoc doesn't run them
     cat << EOF
 # Artix Linux installation summary
 
@@ -1529,7 +1453,6 @@ EOF
     printf '\nThe full installation log: /var/log/artix-install/install.log\n'
 }
 
-# Shows the summary, and saves it in the user's home folder when they want
 save_summary() {
     local summary=$1 file=/home/$USER_NAME/artix-install-summary.md
     printf '\n%s\n\n' "$summary"
@@ -1677,8 +1600,7 @@ main() {
     offer_reboot
 }
 
-# Sourced (the tests run the desktop step on a copy of an installed base
-# system): only the functions
+# The tests source it for the functions
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
     main "$@"
 fi

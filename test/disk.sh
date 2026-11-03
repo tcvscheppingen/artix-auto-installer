@@ -1,14 +1,9 @@
 # shellcheck shell=bash
-# Sourced by the inside-*.sh scripts, which set M=/mnt: opens the test disk
-# on $M and closes it again. LUKS_PASSWORD comes from test.conf.
-#
-# The container shares the kernel with the host: on a Linux host, all loop
-# devices and device-mapper names are the host's too. So this only touches
-# the loop devices of /out/disk.img and uses a name of its own.
+# Sourced by inside-*.sh. On a Linux host loop devices and device-mapper names
+# are shared with the host, so only touch the test disk's own.
 MAP=artixtest-check
 
-# What an aborted run left behind: the mappings on the loop devices of
-# /out/disk.img, then those loop devices
+# Leftovers of an aborted run
 release_test_disk() {
     local loop dev holder
     [[ -e /out/disk.img ]] || return 0
@@ -44,8 +39,7 @@ close_disk() {
     losetup -d "$LOOP" || true
 }
 
-# Docker's /dev is a tmpfs; the kernel's devtmpfs gets partition and
-# /dev/mapper nodes, like the live ISO
+# Docker's /dev is a tmpfs without partition and /dev/mapper nodes
 prepare_dev() {
     # Not allowed in a user namespace: rootless Docker, Podman, userns-remap
     if ! mount -t devtmpfs devtmpfs /dev; then
@@ -58,9 +52,7 @@ prepare_dev() {
     mount -t tmpfs tmpfs /dev/shm
 }
 
-# /tmp/test.conf: test.conf for disk $1, with the desktop to test, local
-# DARBS/SARBS/penrosewm checkouts when mounted, and the NVIDIA choice of this run
-# (TEST_NVIDIA, from run-container-test.sh)
+# test.conf for disk $1, plus this run's choices
 write_test_conf() {
     sed "s|__LOOP__|$1|" /src/test/test.conf > /tmp/test.conf
     {
@@ -69,7 +61,7 @@ write_test_conf() {
         if [[ -d /sarbs ]]; then echo "SARBS_REPO=/sarbs"; fi
         if [[ -d /penrose ]]; then echo "PENROSE_REPO=/penrose"; fi
         if [[ ${TEST_NVIDIA:-yes} == no ]]; then
-            # No pretend NVIDIA GPU: the base system then suits sway too
+            # A base system that suits sway too
             echo "NVIDIA_ID="
             echo "INSTALL_NVIDIA=no"
         elif [[ ${DESKTOP:-none} == sway ]]; then

@@ -1,9 +1,7 @@
-# Imitates the Artix base dinit live ISO as far as a container can:
-# same repos, artools (basestrap, artix-chroot, fstabgen), cryptsetup, kbd...
+# Imitates the Artix base dinit live ISO
 FROM --platform=linux/amd64 artixlinux/artixlinux:latest
 
-# basestrap uses this pacman.conf for the new system too; the image's
-# NoExtract rules (locales, man pages) aren't on the ISO
+# basestrap copies this pacman.conf; the ISO has no NoExtract rules
 RUN sed -i '/^NoExtract/d' /etc/pacman.conf \
  && pacman-key --init && pacman-key --populate artix \
  && pacman -Syu --noconfirm \

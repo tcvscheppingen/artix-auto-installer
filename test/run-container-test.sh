@@ -1,46 +1,16 @@
 #!/usr/bin/env bash
-#
-# Automated validation of ../artix-install.sh, run on the host (macOS/Linux
-# with Docker):
-#
-#   1. shellcheck
-#   2. packages: every desktop environment's package list still resolves in
-#      the Artix repos (cheap, so all of them on every run)
-#   3. install: a privileged Artix container (the "live ISO") runs the real
-#      installer against a 24 GiB loop device, with the desktop to test
-#   4. verify: opens the encrypted disk again and checks the result
-#   5. boot: QEMU (UEFI/OVMF, q35, NVMe, e1000e) boots the disk image,
-#      types the LUKS passphrase over the serial console, logs in and runs
-#      checks in the booted system; with a desktop, it logs in through the
-#      display manager's greeter (xdotool) and checks the session
-#
-# Stages 3-5 run once per desktop. The install stage without a desktop also
-# saves the installed disk as the base system; the other desktops start from
-# a copy of it and only run the installer's desktop step (--full: a whole
-# install for every desktop). A run with sway installs without NVIDIA's
-# driver (sway doesn't support it), so one base system suits every desktop;
-# --nvidia keeps the driver, and sway then gets a whole install of its own.
-# The base systems with and without NVIDIA's driver are kept side by side.
-# Downloaded packages are kept in the Docker volume artix-install-pkgcache.
-#
-# Stages 3-5 run once per desktop. Their logs, screenshots and report go to
-# out/<desktop>/ (test-report.pdf with pandoc and a TeX engine, otherwise
-# test-report.md); shellcheck and packages log to out/. With --desktop all,
-# every desktop is tested in turn and out/test-report.pdf combines them.
-# Every stage's result is saved (out/results.txt, out/<desktop>/results.txt),
-# so `report` writes the reports again, e.g. after rerunning one desktop.
+# Tests ../artix-install.sh in Docker: shellcheck, packages, then per desktop
+# install (on a loop device), verify and boot (QEMU). Desktops start from a
+# saved base system unless --full. Logs and reports go to out/<desktop>/.
 #
 # Usage: ./run-container-test.sh [shellcheck|packages|install|verify|boot|all|report] [--desktop NAME]
 #   --desktop NAME   none (default), plasma, cinnamon, xfce, lxqt, sway, dwm,
-#                    penrose or all: each of them in turn (hours: every one
-#                    installs again)
+#                    penrose or all
 #   --darbs          the same as --desktop dwm
 #   --full           a whole install for every desktop, not the base system
 #   --nvidia         NVIDIA's driver also when the run includes sway
-#   DARBS_DIR=~/src/DARBS SARBS_DIR=~/src/SARBS ./run-container-test.sh all --desktop sway
-#                    test local DARBS/SARBS checkouts instead of the ones on GitHub
-#   PENROSE_DIR=~/src/penrosewm ./run-container-test.sh all --desktop penrose
-#                    the same for a local penrosewm checkout
+#   DARBS_DIR=~/src/DARBS SARBS_DIR=~/src/SARBS PENROSE_DIR=~/src/penrosewm
+#                    test local checkouts instead of the ones on GitHub
 
 set -Eeuo pipefail
 cd "$(dirname "$0")"
@@ -97,8 +67,6 @@ fi
 mkdir -p out
 if [[ $DESKTOP_ARG == all && $STAGE == all ]]; then rm -f out/test-report.md out/test-report.pdf; fi
 
-# The desktop being tested, and the folder its logs go to (out/ for the
-# stages that don't install: shellcheck and packages)
 DESKTOP=none
 OUT=out
 
@@ -107,8 +75,7 @@ build_images() {
     docker build -q -t artix-qemu -f Dockerfile.qemu . > /dev/null
 }
 
-# Loop devices, LUKS and the devtmpfs mount need real root: a privileged
-# container in a user namespace (rootless Docker, userns-remap) isn't enough
+# Loop devices, LUKS and devtmpfs need rootful Docker
 check_rootful_docker() {
     local opts
     opts=$(docker info --format '{{json .SecurityOptions}}' 2> /dev/null) || return 0
@@ -119,7 +86,6 @@ check_rootful_docker() {
 }
 
 live() {
-    # --privileged: loop devices, device mapper (LUKS), mounts, chroot
     docker run --rm --platform linux/amd64 --privileged \
         -e "DESKTOP=$DESKTOP" -e "TEST_NVIDIA=$TEST_NVIDIA" -e "BASE_KEY=$(base_key)" \
         -v "$VOLUME:/out" -v "$PKGCACHE:/pkgcache" -v "$PWD/..:/src:ro" -v "$PWD/$OUT:/logs" \
@@ -131,26 +97,21 @@ boot_vm() {
         artix-qemu expect /test/boot-test.exp
 }
 
-# What the base system was installed with: the installer, its test
-# configuration and the NVIDIA choice. A base system from another version,
-# or older than a day (the packages move on), is installed again.
+# A base system from other sources, or older than a day, is installed again
 base_key() {
     echo "$(cat ../artix-install.sh test.conf inside-install.sh disk.sh | shasum | cut -c1-16) nvidia=$TEST_NVIDIA"
 }
-# One base system with NVIDIA's driver and one without, see inside-install.sh
 base_is_current() {
     docker run --rm --platform linux/amd64 -e "KEY=$(base_key)" -e "BASE=/out/base-nvidia-$TEST_NVIDIA" \
         -v "$VOLUME:/out" artix-live-sim \
         sh -c '[ "$(cat "$BASE.key" 2> /dev/null)" = "$KEY" ] && [ -n "$(find "$BASE.img" -mmin -1440 2> /dev/null)" ]'
 }
 
-# The desktop on the test disk, which inside-install.sh notes there
 disk_desktop() {
     docker run --rm --platform linux/amd64 -v "$VOLUME:/out" artix-live-sim cat /out/desktop.txt 2> /dev/null || echo "no disk"
 }
 
-# verify and boot on their own use the disk of an earlier install, which
-# holds only the desktop installed last
+# verify and boot on their own use the desktop installed last
 check_disk_desktop() {
     local on_disk
     on_disk=$(disk_desktop)
@@ -195,18 +156,16 @@ run_boot() {
     check_disk_desktop
     rm -f "$OUT/dm-screenshot.png" "$OUT/desktop-screenshot.png"
     boot_vm boot.log || rc=$?
-    # Also after a failed boot: the screenshots help to see what went wrong
+    # Also after a failed boot
     if [[ $DESKTOP != none ]]; then live bash /src/test/inside-screenshot.sh || true; fi
     return "$rc"
 }
 
 # --- Results ---
 
-# No associative arrays: macOS ships bash 3.2. Keys: <desktop>_<stage>, and
-# global_<stage> for shellcheck and packages.
+# No associative arrays: macOS ships bash 3.2
 set_result()   { printf -v "RESULT_$1" '%s' "$2"; }
-# Saved results: lines "stage result seconds" in out/results.txt (common
-# stages) and out/<desktop>/results.txt. A rerun replaces the stage's line.
+# Lines "stage result seconds"; a rerun replaces the stage's line
 results_file() { if [[ $1 == global ]]; then echo out/results.txt; else echo "out/$1/results.txt"; fi; }
 save_result() {
     local file
@@ -227,13 +186,12 @@ result()       { local v="RESULT_$1"; echo "${!v-}"; }
 set_duration() { printf -v "DURATION_$1" '%s' "$2"; }
 duration_of()  { local v="DURATION_$1"; echo "${!v-}"; }
 
-# Runs one stage; returns 1 when it failed
 run_stage() {
     local key=$1 stage=$2 rc start
     echo "==> $stage$([[ $key != global ]] && echo " ($DESKTOP)")"
     rm -f "$OUT/$stage.log"
     start=$(date +%s)
-    # A subshell, so set -e still stops the stage at its first error
+    # Subshell: set -e still stops the stage at its first error
     set +e
     ( set -e; "run_$stage" )
     rc=$?
@@ -246,7 +204,7 @@ run_stage() {
 
 # --- Report ---
 
-# Log text without colors, carriage returns and non-ASCII (for LaTeX)
+# Plain ASCII for LaTeX
 plain() { perl -pe 's/\e\[[0-9;?]*[A-Za-z]//g; s/\r//g; s/[^\t\n\x20-\x7e]//g' "$@"; }
 
 duration() {
@@ -260,7 +218,6 @@ git_info() {
     echo "$(git -C "$dir" rev-parse --short HEAD 2> /dev/null || echo unknown)$dirty"
 }
 
-# test.conf value, without quotes
 conf() { sed -n "s/^$1=//p" test.conf | tr -d "'\""; }
 
 check_table() {
@@ -270,8 +227,6 @@ check_table() {
         | sed -E 's/[][\\`*_<>|#]/\\&/g; s/^(PASS|FAIL) +(.*)$/| \2 | \1 |/'
 }
 
-# "12 passed, 0 failed" for a stage log; for the install, which has no
-# checks, the installer's exit code and time
 check_counts() {
     [[ -s $1 ]] || return 0
     if [[ $1 == */install.log ]]; then
@@ -289,7 +244,6 @@ report_header() {
     echo "---"
 }
 
-# The shellcheck and packages results, and what was tested
 report_common() {
     local h=$1 s
     if (( ${#GLOBAL_STAGES[@]} )); then
@@ -312,8 +266,7 @@ report_common() {
          "LTS kernel $(conf INSTALL_LTS), Timeshift $(conf ENABLE_TIMESHIFT), AUR $(conf ENABLE_AUR), swap $(conf SWAP_SIZE) GiB"
 }
 
-# One desktop's results. $1: heading level, $2: path to its folder from the
-# report (for the screenshots)
+# $1: heading level, $2: its folder relative to the report
 report_desktop() {
     local h=$1 dir=$2 d=$DESKTOP s log rice rice_dir
     echo
@@ -380,8 +333,7 @@ report_desktop() {
     done
 }
 
-# Markdown to PDF next to it, when pandoc and a TeX engine are there.
-# $2: the folder the image paths start from.
+# $2: the folder the image paths start from
 make_pdf() {
     local md=$1 res=$2 engine="" e
     for e in xelatex lualatex pdflatex tectonic; do
@@ -398,8 +350,6 @@ make_pdf() {
     echo "Report: test/$md"
 }
 
-# The report of one run: out/<desktop>/test-report, or out/test-report
-# for the shellcheck and packages stages on their own
 write_desktop_report() {
     local md=$OUT/test-report.md
     rm -f "$md" "$OUT/test-report.pdf"
@@ -421,7 +371,6 @@ write_global_report() {
     make_pdf "$md" out
 }
 
-# All desktops: a table with every desktop, then each one's results
 write_combined_report() {
     local md=out/test-report.md d s line
     {
@@ -461,7 +410,6 @@ write_combined_report() {
 if [[ $STAGE == report ]]; then
     load_results global
     if [[ $DESKTOP_ARG == all ]]; then
-        # Only the desktops that ran
         DESKTOPS=()
         for d in "${ALL_DESKTOPS[@]}"; do [[ -r out/$d/results.txt ]] && DESKTOPS+=("$d"); done
     fi
@@ -495,7 +443,6 @@ for d in ${DESKTOPS[@]+"${DESKTOPS[@]}"}; do
             set_result "${d}_$s" skipped
             continue
         fi
-        # A failed desktop doesn't stop the next one
         run_stage "$d" "$s" || { desktop_failed=yes; failed=yes; }
     done
     echo

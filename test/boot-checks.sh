@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs in the booted test system (as root via sudo) during the QEMU boot test.
+# Runs as root in the booted test system
 pass=0 fail=0
 check() {
     local name=$1; shift
@@ -27,18 +27,16 @@ check "sudoers grants tester (ALL : ALL)" sh -c "sudo -l -U tester | grep -q '(A
 check "root password locked"            sh -c "passwd -S root | awk '{print \$2}' | grep -qx L"
 if [ -e /etc/timeshift/timeshift.json ]; then
     check "dinit service cronie started" sh -c "dinitctl status cronie | grep -qi 'started'"
-    # Finds the root file system from the config, without taking a snapshot
+    # --list reads the config without taking a snapshot
     check "timeshift uses the root fs (rsync)" sh -c "out=\$(timeshift --list --scripted 2>&1); echo \"\$out\" | grep -qE \"^UUID +: \$(findmnt -no UUID /)\" && echo \"\$out\" | grep -qE '^Mode +: RSYNC'"
     timeshift --list --scripted 2>&1 | head -n 8
 fi
-# yay only when the test enabled the AUR (verify checks which)
 if command -v yay > /dev/null; then
     check "yay runs"                    sh -c "yay --version"
 fi
 check "sound card found"                grep -q . /proc/asound/cards
-# Artix's udevd handover (udevadm control --exit, then a new udevd) loses the
-# events sent in between. A sound card that finishes probing then, as in the
-# slow VM, keeps root-only permissions; PipeWire then only has a Dummy Output.
+# Artix's udevd handover loses events: a sound card that probes then stays
+# root-only, and PipeWire only gets a Dummy Output
 if [ -e /dev/snd/controlC0 ] && [ "$(stat -c %G /dev/snd/controlC0)" != audio ]; then
     echo "NOTE  udev missed the sound card at boot (Artix udevd handover); running its rules again"
     udevadm trigger --subsystem-match=sound --action=add
@@ -50,7 +48,6 @@ fi
 DESKTOP=$(cat /etc/artix-test-desktop 2> /dev/null || echo none)
 if [ "$DESKTOP" != none ]; then
     echo "== Desktop: $DESKTOP"
-    # The display manager, and the process that shows the session runs
     case $DESKTOP in
         plasma)   dm=sddm;    session=plasmashell ;;
         cinnamon) dm=lightdm; session=cinnamon ;;
@@ -70,7 +67,7 @@ if [ "$DESKTOP" != none ]; then
         sddm)    greeter='sddm-greeter(-qt6)?' ;;
         lightdm) greeter=lightdm-gtk-greeter ;;
     esac
-    # The greeter's X server: its display (SDDM passes none: :0) and auth file
+    # SDDM passes no display: :0
     greeter_x() {
         local args
         args=$(pgrep -af '^/usr/(lib|bin)/X(org)? .*-auth ' | head -n 1)
@@ -79,7 +76,6 @@ if [ "$DESKTOP" != none ]; then
         gdisplay=${gdisplay:-:0}
         gauth=$(echo "$args" | sed -E 's/.* -auth ([^ ]+).*/\1/')
     }
-    # The emulated CPU makes all of this slow
     check "$dm shows its greeter"           sh -c "for i in \$(seq 300); do pgrep -f -x '.*$greeter.*' > /dev/null && exit 0; sleep 2; done; exit 1"
     sleep 30
     greeter_x
@@ -89,16 +85,14 @@ if [ "$DESKTOP" != none ]; then
     DISPLAY="$gdisplay" XAUTHORITY="$gauth" xdotool mousemove 20 20 mousemove 400 300
     sleep 3
     check "screenshot of the login screen"  env DISPLAY="$gdisplay" XAUTHORITY="$gauth" maim /var/tmp/dm-screenshot.png
-    # Log in like a person: the greeter has tester selected and the password
-    # field focused. The password from test.conf.
+    # The greeter has tester selected and the password field focused
     DISPLAY="$gdisplay" XAUTHORITY="$gauth" xdotool type --delay 150 'user pass 123'
     sleep 1
     DISPLAY="$gdisplay" XAUTHORITY="$gauth" xdotool key Return
     check "login through the greeter: $session runs" sh -c "for i in \$(seq 300); do pgrep -u tester -x $session && exit 0; sleep 2; done; exit 1"
-    # turnstile starts the user's dinit, and so PipeWire, when tester logs in
     check "PipeWire runs for tester"        sh -c "for i in \$(seq 60); do pgrep -u tester -x pipewire && exit 0; sleep 2; done; exit 1"
     sink_is_card() { $as_tester "$run wpctl inspect @DEFAULT_AUDIO_SINK@" 2> /dev/null | grep -q 'node.name = "alsa_output'; }
-    # The emulated card can show up late on the slow emulated CPU
+    # The emulated card can show up late
     for _ in $(seq 30); do sink_is_card && break; sleep 2; done
     if ! sink_is_card; then
         wp=$(pgrep -u tester -x wireplumber | head -n 1)
@@ -129,9 +123,7 @@ if [ "$DESKTOP" != none ]; then
         fi
     fi
 
-    # A screenshot of the session for the report. /var/tmp: the test copies
-    # it off the disk after poweroff. dwm and sway: one floating terminal
-    # with fastfetch in the middle of the screen, the way the rice looks.
+    # /var/tmp: the test copies it off the disk after poweroff
     shot=/var/tmp/desktop-screenshot.png
     rm -f $shot
     x="DISPLAY=:0 XAUTHORITY=/home/tester/.Xauthority $run"
@@ -140,14 +132,11 @@ if [ "$DESKTOP" != none ]; then
             $as_tester "$x st" > /dev/null 2>&1 &
             sleep 20
             check "st opens"                sh -c "pgrep -u tester -x st"
-            # mod+shift+space floats the new terminal; dwm keeps its tiled
-            # size, so shrink it and center it on the screen, then run
-            # fastfetch at that size
+            # A floating window keeps its tiled size: shrink and center it
             $as_tester "$x xdotool key super+shift+space" > /dev/null 2>&1
             sleep 2
             read -r sw sh < <($as_tester "$x xdotool getdisplaygeometry")
             $as_tester "$x xdotool getactivewindow windowsize 860 500 windowmove $(((sw - 860) / 2)) $(((sh - 500) / 2))" > /dev/null 2>&1
-            # The pointer is still where the greeter login left it
             $as_tester "$x xdotool mousemove $sw $sh" > /dev/null 2>&1
             sleep 2
             $as_tester "$x xdotool type --delay 30 'clear; fastfetch'" > /dev/null 2>&1
@@ -176,21 +165,18 @@ if [ "$DESKTOP" != none ]; then
             wl="$wl SWAYSOCK=$1"
             # Hide the pointer after 1 s without moving: grim would show it
             $as_tester "$wl swaymsg 'seat * hide_cursor 1000'" > /dev/null 2>&1
-            # foot asks for this size, and sway keeps it for a floating window
             $as_tester "$wl swaymsg 'for_window [app_id=fastfetch] floating enable, move position center'" > /dev/null 2>&1
             $as_tester "$wl swaymsg exec \"foot --app-id=fastfetch --window-size-pixels=860x500 sh -c 'fastfetch; exec \\\$SHELL'\"" > /dev/null 2>&1
             sleep 30
             check "foot opens"              sh -c "pgrep -u tester -x foot"
             check "screenshot of the desktop" su tester -c "$wl grim $shot" ;;
         plasma)
-            # Plasma's first start takes long on the emulated CPU
             sleep 90
             # KWin takes the first free name, not always wayland-0
             set -- /run/user/"$uid"/wayland-?
             wl="$run WAYLAND_DISPLAY=$(basename "$1")"
             check "screenshot of the desktop" sh -c "$as_tester '$wl spectacle -b -n -f -o $shot' && test -s $shot"
             if [ ! -s $shot ]; then
-                # Why it failed: spectacle's own message, and what runs
                 $as_tester "$wl spectacle -b -n -f -o $shot" 2>&1 | tail -n 5 | sed 's/^/NOTE  spectacle: /'
                 echo "NOTE  runtime dir: $(cd /run/user/"$uid" && echo *)"
                 pgrep -u tester -l -f 'kwin|plasmashell|xdg-desktop-portal' | sed 's/^/NOTE  /'

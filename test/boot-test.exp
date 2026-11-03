@@ -1,7 +1,6 @@
 #!/usr/bin/expect -f
-# Boots the installed disk like a laptop: UEFI with empty NVRAM (so the
-# fallback BOOTX64.EFI is used), q35, NVMe, e1000e, Intel HDA sound (no
-# host audio). TCG is slow, hence the timeouts.
+# Boots the installed disk like a laptop. Empty NVRAM: tests the fallback
+# BOOTX64.EFI. TCG is slow, hence the timeouts.
 set timeout 900
 if {[info exists env(BOOT_LOG)]} { set boot_log $env(BOOT_LOG) } else { set boot_log boot.log }
 log_file -noappend /logs/$boot_log
@@ -47,7 +46,7 @@ proc check {ok name} {
     if {$ok} { send_user "\nPASS  $name\n"; incr passed } else { send_user "\nFAIL  $name\n"; incr failed }
 }
 
-# --- Login, through getty + PAM ---
+# --- Login ---
 # A wrong password first, so a successful login proves it is checked
 sleep 5
 send -- "$user\r"
@@ -81,7 +80,7 @@ expect {
 }
 expect "READY> "
 
-# --- sudo (-k: always ask for the password) ---
+# --- sudo ---
 send -- "sudo -k; sudo id -u\r"
 expect "password for $user"
 send -- "wrong password\r"
@@ -104,7 +103,6 @@ expect {
 expect "READY> "
 
 # --- System checks as root ---
-# With a desktop, the checks wait for its session on the emulated CPU
 set timeout 2700
 send -- "sudo -k; sudo /usr/local/bin/boot-checks.sh\r"
 expect "password for $user"
@@ -115,6 +113,8 @@ expect {
         incr failed $expect_out(2,string)
     }
     timeout { fail "boot checks did not finish" }
+    # Most often Docker's OOM killer
+    eof { fail "the VM stopped during the boot checks (out of memory in Docker? see dmesg of Docker's VM)" }
 }
 expect "READY> "
 send -- "sudo poweroff\r"

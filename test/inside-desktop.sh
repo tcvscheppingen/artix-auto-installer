@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# Runs inside the artix-live-sim container: puts the base system that
-# inside-install.sh saved without a desktop back on the test disk, and runs
-# only the installer's desktop step on it. Much faster than a full install
-# for every desktop; run-container-test.sh --full tests the whole way.
+# Restores the saved base system and runs only the installer's desktop step
 set -Eeuo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=disk.sh
@@ -11,7 +8,6 @@ prepare_dev
 umount -R /mnt 2> /dev/null || true
 release_test_disk
 
-# With or without NVIDIA's driver, see inside-install.sh
 base=/out/base-nvidia-${TEST_NVIDIA:-yes}.img
 [[ -s $base ]] || { echo "No base system in $base" >&2; exit 1; }
 cp --sparse=always "$base" /out/disk.img
@@ -27,7 +23,7 @@ open_disk
 write_test_conf "$LOOP"
 # shellcheck source=/dev/null
 source /tmp/test.conf
-# Only the functions, see the end of their part of the script
+# Defines the functions only
 # shellcheck source-path=SCRIPTDIR source=../artix-install.sh
 source /src/artix-install.sh
 # What the installer sets up before its desktop step
@@ -46,8 +42,7 @@ desktop_step() {
         *)                         die "Not a desktop: $DESKTOP" ;;
     esac
 }
-# The base system has the Timeshift hook already; the installer writes it after
-# the desktop step, so keep it out of the desktop's pacman runs
+# The installer adds the Timeshift hook after the desktop step
 hook=$M/etc/pacman.d/hooks/00-timeshift.hook
 [[ -e $hook ]] && mv "$hook" "$hook.off"
 start=$(date +%s)
