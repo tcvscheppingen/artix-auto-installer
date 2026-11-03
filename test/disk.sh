@@ -59,7 +59,7 @@ prepare_dev() {
 }
 
 # /tmp/test.conf: test.conf for disk $1, with the desktop to test, local
-# DARBS/SARBS checkouts when mounted, and the NVIDIA choice of this run
+# DARBS/SARBS/penrosewm checkouts when mounted, and the NVIDIA choice of this run
 # (TEST_NVIDIA, from run-container-test.sh)
 write_test_conf() {
     sed "s|__LOOP__|$1|" /src/test/test.conf > /tmp/test.conf
@@ -67,6 +67,7 @@ write_test_conf() {
         echo "DESKTOP=${DESKTOP:-none}"
         if [[ -d /darbs ]]; then echo "DARBS_REPO=/darbs"; fi
         if [[ -d /sarbs ]]; then echo "SARBS_REPO=/sarbs"; fi
+        if [[ -d /penrose ]]; then echo "PENROSE_REPO=/penrose"; fi
         if [[ ${TEST_NVIDIA:-yes} == no ]]; then
             # No pretend NVIDIA GPU: the base system then suits sway too
             echo "NVIDIA_ID="

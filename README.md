@@ -43,6 +43,7 @@ You can choose one of these:
 | LXQt | yes (LightDM) | A light, traditional desktop like XFCE, built with Qt, with a terminal, file manager, archive manager, image viewer, screenshot tool and sound, network and Bluetooth settings |
 | sway | your choice | My keyboard-driven [sway setup](https://github.com/tcvscheppingen/SARBS) (SARBS) |
 | dwm | your choice | My keyboard-driven [dwm setup](https://github.com/tcvscheppingen/DARBS) (DARBS) |
+| penrose | your choice | My own window manager, written in Rust with [Penrose](https://github.com/sminez/penrose) ([penrosewm](https://github.com/tcvscheppingen/penrosewm)). **For advanced users only** |
 
 <p align="center">
   <a href="assets/desktops/plasma.jpg"><img src="assets/desktops/plasma.jpg" width="250" alt="KDE Plasma with its Welcome Center"></a>
@@ -62,6 +63,11 @@ Sound and network work right away with every desktop.
 Sway and dwm are window managers: you control your windows mostly with the keyboard.
 They use less memory and processor power than the desktop environments, so they are the lightest option, but they take some time to learn.
 The script installs them with my own configuration. They can start right after you log in on the text console, or from a simple login screen in the same style. The script asks which one you prefer.
+
+Penrose is a window manager too, but only pick it if you know your way around Linux.
+It's my own window manager, and the script builds it from Rust source code while it installs.
+To change its settings or key bindings you edit that Rust code and build it again, and when it doesn't start you fix it from the text console.
+It looks and works a lot like dwm, so if you're not sure, choose dwm.
 
 A few limitations:
 - Sway doesn't work with NVIDIA's own driver. If you choose sway, the script uses the open source nouveau driver instead. On a laptop that also has Intel or AMD graphics, sway uses those.
@@ -144,13 +150,14 @@ It runs the installer in an Artix container on a disk image, checks the installe
 
 ```bash
 test/run-container-test.sh                          # shellcheck, packages, install, verify, boot; no desktop
-test/run-container-test.sh all --desktop plasma     # with a desktop: plasma, cinnamon, xfce, lxqt, sway or dwm
+test/run-container-test.sh all --desktop plasma     # with a desktop: plasma, cinnamon, xfce, lxqt, sway, dwm or penrose
 test/run-container-test.sh all --desktop all        # every desktop in turn (takes hours)
 test/run-container-test.sh report --desktop all     # write the reports again from the saved results
 test/run-container-test.sh all --desktop all --full # a whole install for every desktop
 test/run-container-test.sh all --desktop sway --nvidia  # keep NVIDIA's driver in a run with sway
 DARBS_DIR=~/src/DARBS test/run-container-test.sh all --desktop dwm    # a local DARBS checkout
 SARBS_DIR=~/src/SARBS test/run-container-test.sh all --desktop sway   # a local SARBS checkout
+PENROSE_DIR=~/src/penrosewm test/run-container-test.sh all --desktop penrose  # a local penrosewm checkout
 ```
 
 Every run checks whether the package lists of Plasma, Cinnamon, XFCE and LXQt still exist in the Artix repos.

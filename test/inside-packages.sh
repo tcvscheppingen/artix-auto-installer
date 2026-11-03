@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Runs inside the artix-live-sim container: checks that every desktop
 # environment's package list (artix-install.sh --print-desktop-packages)
-# still resolves in the Artix repos, with the GPU drivers it can add. sway
-# and dwm come from SARBS and DARBS, which their own test runs cover.
+# still resolves in the Artix repos, with the GPU drivers it can add. sway,
+# dwm and penrose come from SARBS, DARBS and penrosewm, which their own
+# test runs cover.
 set -Eeuo pipefail
 
 pacman -Sy > /dev/null

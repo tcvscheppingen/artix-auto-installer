@@ -31,19 +31,22 @@
 # so `report` writes the reports again, e.g. after rerunning one desktop.
 #
 # Usage: ./run-container-test.sh [shellcheck|packages|install|verify|boot|all|report] [--desktop NAME]
-#   --desktop NAME   none (default), plasma, cinnamon, xfce, lxqt, sway, dwm or
-#                    all: each of them in turn (hours: every one installs again)
+#   --desktop NAME   none (default), plasma, cinnamon, xfce, lxqt, sway, dwm,
+#                    penrose or all: each of them in turn (hours: every one
+#                    installs again)
 #   --darbs          the same as --desktop dwm
 #   --full           a whole install for every desktop, not the base system
 #   --nvidia         NVIDIA's driver also when the run includes sway
 #   DARBS_DIR=~/src/DARBS SARBS_DIR=~/src/SARBS ./run-container-test.sh all --desktop sway
 #                    test local DARBS/SARBS checkouts instead of the ones on GitHub
+#   PENROSE_DIR=~/src/penrosewm ./run-container-test.sh all --desktop penrose
+#                    the same for a local penrosewm checkout
 
 set -Eeuo pipefail
 cd "$(dirname "$0")"
 
-ALL_DESKTOPS=(none plasma cinnamon xfce lxqt sway dwm)
-usage() { echo "Usage: $0 [shellcheck|packages|install|verify|boot|all|report] [--desktop none|plasma|cinnamon|xfce|lxqt|sway|dwm|all] [--full] [--nvidia]" >&2; exit 1; }
+ALL_DESKTOPS=(none plasma cinnamon xfce lxqt sway dwm penrose)
+usage() { echo "Usage: $0 [shellcheck|packages|install|verify|boot|all|report] [--desktop none|plasma|cinnamon|xfce|lxqt|sway|dwm|penrose|all] [--full] [--nvidia]" >&2; exit 1; }
 STAGE=all
 DESKTOP_ARG=none
 FULL=no
@@ -61,7 +64,7 @@ while (( $# )); do
 done
 case $DESKTOP_ARG in
     all) DESKTOPS=("${ALL_DESKTOPS[@]}") ;;
-    none|plasma|cinnamon|xfce|lxqt|sway|dwm) DESKTOPS=("$DESKTOP_ARG") ;;
+    none|plasma|cinnamon|xfce|lxqt|sway|dwm|penrose) DESKTOPS=("$DESKTOP_ARG") ;;
     *) usage ;;
 esac
 GLOBAL_STAGES=() DESKTOP_STAGES=()
@@ -86,6 +89,10 @@ fi
 if [[ -n ${SARBS_DIR-} ]]; then
     SARBS_DIR=$(cd "$SARBS_DIR" && pwd)
     RICE_MOUNTS+=(-v "$SARBS_DIR:/sarbs:ro")
+fi
+if [[ -n ${PENROSE_DIR-} ]]; then
+    PENROSE_DIR=$(cd "$PENROSE_DIR" && pwd)
+    RICE_MOUNTS+=(-v "$PENROSE_DIR:/penrose:ro")
 fi
 mkdir -p out
 if [[ $DESKTOP_ARG == all && $STAGE == all ]]; then rm -f out/test-report.md out/test-report.pdf; fi
@@ -318,10 +325,11 @@ report_desktop() {
         echo "| $s | $(result "${d}_$s") | $(duration "$(duration_of "${d}_$s")") | $(check_counts "$OUT/$s.log") |"
     done
     echo
-    echo "- Desktop: $d$([[ $d == sway || $d == dwm ]] && echo ", login $(conf DESKTOP_LOGIN)")"
-    if [[ $d == dwm || $d == sway ]]; then
+    echo "- Desktop: $d$([[ $d == sway || $d == dwm || $d == penrose ]] && echo ", login $(conf DESKTOP_LOGIN)")"
+    if [[ $d == dwm || $d == sway || $d == penrose ]]; then
         rice=DARBS rice_dir=${DARBS_DIR-}
         [[ $d == sway ]] && rice=SARBS rice_dir=${SARBS_DIR-}
+        [[ $d == penrose ]] && rice=penrosewm rice_dir=${PENROSE_DIR-}
         if [[ -n $rice_dir ]]; then
             echo "- $rice: local checkout $rice_dir, commit $(git_info "$rice_dir")"
         else

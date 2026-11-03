@@ -9,8 +9,10 @@
 #   * optional: linux-lts fallback kernel, Timeshift snapshots, NVIDIA driver,
 #     yay (AUR)
 #   * optional desktop: KDE Plasma, Cinnamon, XFCE or LXQt, or sway
-#     (https://github.com/tcvscheppingen/SARBS) or dwm
-#     (https://github.com/tcvscheppingen/DARBS); without one it boots to a TTY
+#     (https://github.com/tcvscheppingen/SARBS), dwm
+#     (https://github.com/tcvscheppingen/DARBS) or penrose, for advanced users
+#     (https://github.com/tcvscheppingen/penrosewm); without one it
+#     boots to a TTY
 #
 # For UEFI PCs and laptops with an Intel or AMD CPU. Run it as root from the
 # Artix base dinit live ISO.
@@ -32,7 +34,7 @@ readonly LOG=/tmp/artix-install.log
 readonly AUR_WIKI="https://wiki.archlinux.org/title/Arch_User_Repository"
 readonly DARBS_URL="https://github.com/tcvscheppingen/DARBS"
 readonly SARBS_URL="https://github.com/tcvscheppingen/SARBS"
-readonly PENROSEWM_URL="https://github.com/tcvscheppingen/penrosewm"
+readonly PENROSE_URL="https://github.com/tcvscheppingen/penrosewm"
 # Lets the user's rice script use sudo without a password during the install
 readonly RICE_SUDOERS=/etc/sudoers.d/99-artix-install
 
@@ -327,8 +329,14 @@ desktop_packages() {
     esac
 }
 
-# The name of the rice repository for sway or dwm
-rice_name() { if [[ $1 == sway ]]; then echo SARBS; else echo DARBS; fi; }
+# The name of the rice repository for sway, dwm or penrose
+rice_name() {
+    case $1 in
+        sway)    echo SARBS ;;
+        penrose) echo penrosewm ;;
+        *)       echo DARBS ;;
+    esac
+}
 
 desktop_label() {
     case $1 in
@@ -337,7 +345,7 @@ desktop_label() {
         cinnamon) echo "Cinnamon, LightDM login screen" ;;
         xfce)     echo "XFCE, LightDM login screen" ;;
         lxqt)     echo "LXQt, LightDM login screen" ;;
-        sway|dwm)
+        sway|dwm|penrose)
             case $DESKTOP_LOGIN in
                 tty)  echo "$1 ($(rice_name "$1")), starts on TTY1 login" ;;
                 dm)   echo "$1 ($(rice_name "$1")), LightDM login screen" ;;
@@ -388,12 +396,17 @@ rice_cleanup() {
     return 0
 }
 
-# sway or dwm: runs SARBS's or DARBS's auto-rice-artix.sh as the user, the
-# way the user would run it after the first boot
+# sway, dwm or penrose: runs SARBS's, DARBS's or penrosewm's
+# auto-rice-artix.sh as the user, the way the user would run it after the
+# first boot
 install_rice() {
     local name repo dir rc=0
     name=$(rice_name "$DESKTOP")
-    if [[ $name == SARBS ]]; then repo=${SARBS_REPO:-$SARBS_URL}; else repo=${DARBS_REPO:-$DARBS_URL}; fi
+    case $DESKTOP in
+        sway)    repo=${SARBS_REPO:-$SARBS_URL} ;;
+        penrose) repo=${PENROSE_REPO:-$PENROSE_URL} ;;
+        *)       repo=${DARBS_REPO:-$DARBS_URL} ;;
+    esac
     dir=/home/$USER_NAME/$name
     rm -rf "${MNT:?}$dir"
     if [[ -d $repo ]]; then
@@ -515,9 +528,11 @@ load_settings() {
     # yes: a container on someone's computer, so don't touch its EFI boot
     # entries, clock or console keymap
     TEST_IN_CONTAINER=${TEST_IN_CONTAINER-no}
-    # A git URL or a local checkout of SARBS/DARBS (tests: a local checkout)
+    # A git URL or a local checkout of SARBS/DARBS/penrosewm (tests: a
+    # local checkout)
     SARBS_REPO=${SARBS_REPO-}
     DARBS_REPO=${DARBS_REPO-}
+    PENROSE_REPO=${PENROSE_REPO-}
 }
 
 start_logging() {
@@ -817,10 +832,11 @@ EOF
 }
 
 ask_desktop() {
-    local desktop_preset=$DESKTOP
+    local desktop_preset=$DESKTOP penrose_sure
     info ""
-    info "A desktop environment with its login screen, or my sway or dwm setup"
-    info "(SARBS/DARBS on GitHub). Without one the system boots to a text console."
+    info "A desktop environment with its login screen, or my sway, dwm or penrose"
+    info "setup (SARBS/DARBS/penrosewm on GitHub). Without one the system boots"
+    info "to a text console."
     while :; do
         ask_choice DESKTOP "Desktop" none \
             "none:no desktop, boots to a TTY" \
@@ -830,7 +846,22 @@ ask_desktop() {
             "lxqt:LXQt (LightDM login screen)" \
             "sway:sway, my Wayland setup (SARBS)" \
             "dwm:dwm, my X11 setup (DARBS)" \
-            "penrosewm:penrosewm, my own window manager written in Rust with Penrose"
+            "penrose:penrose, my own window manager in Rust, for advanced users"
+        if [[ $DESKTOP == penrose ]]; then
+            warn "penrose is for advanced users only."
+            info "It's my own window manager, built from Rust source during the install."
+            info "You change its settings and key bindings in Rust (src/main.rs) and"
+            info "build it again. It has no system tray, and when it doesn't start you"
+            info "fix it from the text console (see the README in ~/penrosewm)."
+            # A preset DESKTOP=penrose was chosen on purpose
+            [[ -n $desktop_preset ]] && break
+            penrose_sure=""
+            ask_yes_no penrose_sure "Install penrose anyway?" n
+            [[ $penrose_sure == yes ]] && break
+            DESKTOP=""
+            info "Choose another desktop then."
+            continue
+        fi
         [[ $DESKTOP == sway && $INSTALL_NVIDIA == yes ]] || break
         # sway refuses to start when NVIDIA's driver is loaded
         warn "sway doesn't support NVIDIA's driver and won't start with it."
@@ -844,7 +875,7 @@ ask_desktop() {
         DESKTOP="" SWAY_WITHOUT_NVIDIA=""
         info "Choose another desktop then."
     done
-    if [[ $DESKTOP == sway || $DESKTOP == dwm || $DESKTOP = penrosewm ]]; then
+    if [[ $DESKTOP == sway || $DESKTOP == dwm || $DESKTOP == penrose ]]; then
         ask_choice DESKTOP_LOGIN "Start $DESKTOP" dm \
             "tty:automatically when you log in on TTY1" \
             "dm:from a minimal graphical login screen (LightDM)" \
@@ -1231,7 +1262,7 @@ install_yay() {
 install_desktop() {
     case $DESKTOP in
         plasma|cinnamon|xfce|lxqt) install_desktop_environment ;;
-        sway|dwm|penrosewm)                  install_rice ;;
+        sway|dwm|penrose)          install_rice ;;
     esac
 }
 
@@ -1336,7 +1367,7 @@ summary_login_steps() {
             echo "4. Install a desktop, for example DARBS: $DARBS_URL or SARBS: $SARBS_URL" ;;
         plasma|cinnamon|xfce|lxqt)
             echo "Log in as $USER_NAME on the login screen. Connect to Wi-Fi with the network icon in the panel." ;;
-        sway|dwm|penrosewm)
+        sway|dwm|penrose)
             case $DESKTOP_LOGIN in
                 tty)  printf '%s' "Log in as $USER_NAME on TTY1; $DESKTOP starts by itself." ;;
                 dm)   printf '%s' "Log in as $USER_NAME on the login screen ($DESKTOP session)." ;;
@@ -1354,16 +1385,17 @@ summary_sound_section() {
 
 The older HDA driver is used instead of SOF, set in /etc/modprobe.d/legacy-hda.conf.
 The built-in digital microphones don't work with it. To use SOF again, run
-`sudo rm /etc/modprobe.d/legacy-hda.conf` (with DARBS: `sound-fix sof`) and reboot.
+`sudo rm /etc/modprobe.d/legacy-hda.conf` (with DARBS or penrose: `sound-fix sof`) and reboot.
 EOF
     else
         cat << 'EOF'
 
 ## Sound
 
-The SOF driver is used. If you only get a "Dummy Output" (DARBS's bar shows
-`vol dummy`), switch to the older HDA driver; the built-in digital microphones
-don't work with it. With DARBS, run `sound-fix`. Without it, run
+The SOF driver is used. If you only get a "Dummy Output" (the DARBS and penrose
+bars show `vol dummy`), switch to the older HDA driver; the built-in digital
+microphones don't work with it. With DARBS or penrose, run `sound-fix`. Without
+them, run
 `echo 'options snd-intel-dspcfg dsp_driver=1' | sudo tee /etc/modprobe.d/legacy-hda.conf`.
 Then reboot.
 EOF
@@ -1466,7 +1498,7 @@ Installed on $(date '+%F %R %Z') with artix-install.sh $SCRIPT_VERSION.
 - Keyboard in X: $(if [[ -n $X11_LAYOUT ]]; then echo "$X11_LAYOUT${X11_VARIANT:+ ($X11_VARIANT)}, in /etc/X11/xorg.conf.d/00-keyboard.conf"; else echo "not set (no X layout known for $KEYMAP); set it in /etc/X11/xorg.conf.d/00-keyboard.conf"; fi)
 - Time zone: $TIMEZONE
 - Mirrors: ranked at install time; the stock list is /etc/pacman.d/mirrorlist.stock
-- Desktop: $(desktop_label "$DESKTOP")$([[ $DESKTOP == sway || $DESKTOP == dwm || $DESKTOP == penrosewm ]] && echo "; the rice is in ~/$(rice_name "$DESKTOP")")
+- Desktop: $(desktop_label "$DESKTOP")$([[ $DESKTOP == sway || $DESKTOP == dwm || $DESKTOP == penrose ]] && echo "; the rice is in ~/$(rice_name "$DESKTOP")")
 - AUR: $([[ $ENABLE_AUR == yes ]] && echo "yay installed. AUR packages are unofficial, review their PKGBUILDs ($AUR_WIKI)" || echo "not enabled")
 
 ## Accounts

@@ -58,6 +58,7 @@ if [ "$DESKTOP" != none ]; then
         lxqt)     dm=lightdm; session=lxqt-session ;;
         sway)     dm=lightdm; session=sway ;;
         dwm)      dm=lightdm; session=dwm ;;
+        penrose)  dm=lightdm; session=penrose ;;
     esac
     uid=$(id -u tester)
     as_tester="su tester -c"
@@ -113,12 +114,12 @@ if [ "$DESKTOP" != none ]; then
     ls -l /dev/snd 2> /dev/null
 
     case $DESKTOP in
-        cinnamon|xfce|lxqt|dwm)
+        cinnamon|xfce|lxqt|dwm|penrose)
             # Xorg logs the option as xkb_variant, not XkbVariant like in the file
             check "X keyboard: us international" grep -qiE 'xkb_?variant" "intl"' /var/log/Xorg.0.log
             grep -E '\((EE)\)' /var/log/Xorg.0.log 2> /dev/null | head -n 5 ;;
     esac
-    if [ "$DESKTOP" = dwm ]; then
+    if [ "$DESKTOP" = dwm ] || [ "$DESKTOP" = penrose ]; then
         check "volume block shows the volume" sh -c "$as_tester '$run ~/.local/bin/statusbar/sb-volume' | grep -qE '^vol [0-9]+%'"
         check "sound-fix: HDA driver in use"  sh -c "$as_tester '$run ~/.local/bin/sound-fix status' | grep -q '^Driver: HDA'"
         check "sound-fix: sound works"        sh -c "$as_tester '$run ~/.local/bin/sound-fix' | grep -q '^Sound works'"
@@ -147,6 +148,18 @@ if [ "$DESKTOP" != none ]; then
             read -r sw sh < <($as_tester "$x xdotool getdisplaygeometry")
             $as_tester "$x xdotool getactivewindow windowsize 860 500 windowmove $(((sw - 860) / 2)) $(((sh - 500) / 2))" > /dev/null 2>&1
             # The pointer is still where the greeter login left it
+            $as_tester "$x xdotool mousemove $sw $sh" > /dev/null 2>&1
+            sleep 2
+            $as_tester "$x xdotool type --delay 30 'clear; fastfetch'" > /dev/null 2>&1
+            $as_tester "$x xdotool key Return" > /dev/null 2>&1
+            sleep 10
+            check "screenshot of the desktop" su tester -c "$x maim $shot" ;;
+        penrose)
+            # penrose has no floating toggle: st takes the whole screen
+            $as_tester "$x st" > /dev/null 2>&1 &
+            sleep 20
+            check "st opens"                sh -c "pgrep -u tester -x st"
+            read -r sw sh < <($as_tester "$x xdotool getdisplaygeometry")
             $as_tester "$x xdotool mousemove $sw $sh" > /dev/null 2>&1
             sleep 2
             $as_tester "$x xdotool type --delay 30 'clear; fastfetch'" > /dev/null 2>&1

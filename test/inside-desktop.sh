@@ -42,7 +42,7 @@ desktop_step() {
     step "Installing $(desktop_label "$DESKTOP") on the saved base system"
     case $DESKTOP in
         plasma|cinnamon|xfce|lxqt) install_desktop_environment ;;
-        sway|dwm)                  install_rice ;;
+        sway|dwm|penrose)          install_rice ;;
         *)                         die "Not a desktop: $DESKTOP" ;;
     esac
 }

@@ -191,6 +191,31 @@ case $DESKTOP in
         check "minimal greeter, DARBS wallpaper" sh -c "grep -q '^background = /usr/share/backgrounds/darbs/wallpaper.jpg' $M/etc/lightdm/lightdm-gtk-greeter.conf && test -s $M/usr/share/backgrounds/darbs/wallpaper.jpg"
         check "no TTY autostart (dm chosen)"   sh -c "! grep -qs 'exec startx' $H/.bash_profile"
         check "home files owned by $USER_NAME" sh -c "[ -z \"\$(find $H ! -uid \$(chroot $M id -u $USER_NAME) | head -1)\" ]" ;;
+    penrose)
+        check "no dinit services missing"      sh -c "! grep -q 'services were not found' /logs/install.log"
+        check "penrose built and installed"    test -x $M/usr/local/bin/penrose
+        check "penrose source in ~/.local/src" test -f "$H/.local/src/penrose/src/main.rs"
+        for prog in st dmenu slock dwmblocks; do
+            check "$prog built and installed"  test -x $M/usr/local/bin/$prog
+        done
+        check "st runs"                        sh -c "chroot $M /usr/local/bin/st -v 2>&1 | grep -qE 'st [0-9]'"
+        check "desktop packages installed"     chroot $M pacman -Q xorg-server xorg-xinit xorg-xmodmap rust pipewire wireplumber dunst librewolf turnstile
+        check "xss-lock installed from [extra]" chroot $M pacman -Q xss-lock
+        check "[extra] enabled"                grep -q '^\[extra\]' $M/etc/pacman.conf
+        for svc in dbus turnstiled bluetoothd NetworkManager lightdm; do
+            check "system service $svc enabled" test -L $M/etc/dinit.d/boot.d/$svc
+        done
+        for svc in pipewire pipewire-pulse wireplumber; do
+            check "user service $svc enabled"  test -L "$H/.config/dinit.d/boot.d/$svc"
+        done
+        check "$USER_NAME in group video"      sh -c "chroot $M id -nG $USER_NAME | grep -qw video"
+        check "dotfiles copied"                test -f "$H/.config/x11/xinitrc" -a -d "$H/.local/bin"
+        check "wallpaper linked"               test -L "$H/.local/share/bg"
+        check "penrose session for LightDM"    sh -c "grep -q '^Exec=/usr/local/bin/penrose-session' $M/usr/share/xsessions/penrose.desktop && test -x $M/usr/local/bin/penrose-session"
+        check "LightDM starts penrose by default" grep -qx 'user-session=penrose' $M/etc/lightdm/lightdm.conf.d/50-penrose.conf
+        check "minimal greeter, penrose wallpaper" sh -c "grep -q '^background = /usr/share/backgrounds/penrose/wallpaper.jpg' $M/etc/lightdm/lightdm-gtk-greeter.conf && test -s $M/usr/share/backgrounds/penrose/wallpaper.jpg"
+        check "no TTY autostart (dm chosen)"   sh -c "! grep -qs 'exec startx' $H/.bash_profile"
+        check "home files owned by $USER_NAME" sh -c "[ -z \"\$(find $H ! -uid \$(chroot $M id -u $USER_NAME) | head -1)\" ]" ;;
     sway)
         check "no dinit services missing"      sh -c "! grep -q 'services were not found' /logs/install.log"
         check "sway and its tools installed"   chroot $M pacman -Q sway swaybg swaylock swayidle foot waybar mako grim pipewire wireplumber librewolf turnstile
@@ -229,8 +254,8 @@ echo "$DESKTOP" > $M/etc/artix-test-desktop
 rm -f $M/etc/sddm.conf.d/90-test-autologin.conf $M/etc/lightdm/lightdm.conf.d/90-test-autologin.conf
 if [[ $DESKTOP != none ]]; then
     # artix-chroot: pacman needs /proc, /dev and resolv.conf
-    # fastfetch: the dwm and sway screenshots show it in a floating terminal
-    extra=(); [[ $DESKTOP == dwm || $DESKTOP == sway ]] && extra=(fastfetch)
+    # fastfetch: the dwm, sway and penrose screenshots show it in a terminal
+    extra=(); [[ $DESKTOP == dwm || $DESKTOP == sway || $DESKTOP == penrose ]] && extra=(fastfetch)
     artix-chroot $M pacman -S --needed --noconfirm --disable-sandbox maim xdotool "${extra[@]}" > /dev/null
     artix-chroot $M gpgconf --homedir /etc/pacman.d/gnupg --kill all &> /dev/null || true
 fi
