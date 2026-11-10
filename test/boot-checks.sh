@@ -144,17 +144,16 @@ if [ "$DESKTOP" != none ]; then
             sleep 10
             check "screenshot of the desktop" su tester -c "$x maim $shot" ;;
         penrose)
-            # penrose has no floating toggle: st takes the whole screen
-            $as_tester "$x st" > /dev/null 2>&1 &
+            # penrose has no floating toggle and st would take the whole
+            # screen, so the screenshot shows the desktop before st opens
             sleep 20
-            check "st opens"                sh -c "pgrep -u tester -x st"
             read -r sw sh < <($as_tester "$x xdotool getdisplaygeometry")
             $as_tester "$x xdotool mousemove $sw $sh" > /dev/null 2>&1
             sleep 2
-            $as_tester "$x xdotool type --delay 30 'clear; fastfetch'" > /dev/null 2>&1
-            $as_tester "$x xdotool key Return" > /dev/null 2>&1
-            sleep 10
-            check "screenshot of the desktop" su tester -c "$x maim $shot" ;;
+            check "screenshot of the desktop" su tester -c "$x maim $shot"
+            $as_tester "$x st" > /dev/null 2>&1 &
+            sleep 20
+            check "st opens"                sh -c "pgrep -u tester -x st" ;;
         cinnamon|xfce|lxqt)
             sleep 60
             check "screenshot of the desktop" su tester -c "$x maim $shot" ;;

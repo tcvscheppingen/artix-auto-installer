@@ -20,7 +20,7 @@
 #INSTALL_NVIDIA=             # yes/no, only asked when an NVIDIA GPU is found
 #AUDIO_LEGACY_HDA=           # yes = older HDA sound driver instead of SOF (asked for Intel audio with a DSP)
 #ENABLE_AUR=no               # yes = build and install yay
-#DESKTOP=none                # none, plasma, cinnamon, xfce, lxqt, sway (SARBS), dwm (DARBS) or penrose (penrosewm, advanced users only)
+#DESKTOP=none                # none, plasma, cinnamon, xfce, lxqt, sway (SARBS), dwm (DARBS) or penrose (PARBS, advanced users only)
 #DESKTOP_LOGIN=dm            # sway/dwm/penrose only: tty (start on TTY1 login), dm (LightDM login screen) or none
 #SWAY_WITHOUT_NVIDIA=        # sway with an NVIDIA GPU: yes = skip NVIDIA's driver (sway doesn't support it), empty = ask
 #CONFIRM_WIPE=no             # yes = don't ask to type ERASE
@@ -40,4 +40,4 @@
 #TEST_IN_CONTAINER=no        # tests only: don't touch the host's EFI entries, clock or keymap
 #SARBS_REPO=                 # git URL or local checkout of SARBS, empty = GitHub
 #DARBS_REPO=                 # git URL or local checkout of DARBS, empty = GitHub
-#PENROSE_REPO=               # git URL or local checkout of penrosewm, empty = GitHub
+#PARBS_REPO=                 # git URL or local checkout of PARBS, empty = GitHub

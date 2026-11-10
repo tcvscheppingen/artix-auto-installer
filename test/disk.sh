@@ -59,7 +59,7 @@ write_test_conf() {
         echo "DESKTOP=${DESKTOP:-none}"
         if [[ -d /darbs ]]; then echo "DARBS_REPO=/darbs"; fi
         if [[ -d /sarbs ]]; then echo "SARBS_REPO=/sarbs"; fi
-        if [[ -d /penrose ]]; then echo "PENROSE_REPO=/penrose"; fi
+        if [[ -d /parbs ]]; then echo "PARBS_REPO=/parbs"; fi
         if [[ ${TEST_NVIDIA:-yes} == no ]]; then
             # A base system that suits sway too
             echo "NVIDIA_ID="

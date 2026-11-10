@@ -43,7 +43,7 @@ You can choose one of these:
 | LXQt | yes (LightDM) | A light, traditional desktop like XFCE, built with Qt, with a terminal, file manager, archive manager, image viewer, screenshot tool and sound, network and Bluetooth settings |
 | sway | your choice | My keyboard-driven [sway setup](https://github.com/tcvscheppingen/SARBS) (SARBS) |
 | dwm | your choice | My keyboard-driven [dwm setup](https://github.com/tcvscheppingen/DARBS) (DARBS) |
-| penrose | your choice | My own window manager, written in Rust with [Penrose](https://github.com/sminez/penrose) ([penrosewm](https://github.com/tcvscheppingen/penrosewm)). **For advanced users only** |
+| penrose | your choice | My own window manager, written in Rust with [Penrose](https://github.com/sminez/penrose) ([penrosewm](https://github.com/tcvscheppingen/penrosewm), installed with [PARBS](https://github.com/tcvscheppingen/PARBS)). **For advanced users only** |
 
 <p align="center">
   <a href="assets/desktops/plasma.jpg"><img src="assets/desktops/plasma.jpg" width="250" alt="KDE Plasma with its Welcome Center"></a>
@@ -54,7 +54,9 @@ You can choose one of these:
   <a href="assets/desktops/sway.jpg"><img src="assets/desktops/sway.jpg" width="250" alt="sway with a floating terminal running fastfetch, from SARBS"></a>
   <a href="assets/desktops/dwm.jpg"><img src="assets/desktops/dwm.jpg" width="250" alt="dwm with a floating terminal running fastfetch, from DARBS"></a>
   <br>
-  <sub>KDE Plasma, Cinnamon and XFCE; LXQt, sway and dwm.</sub>
+  <a href="assets/desktops/penrose.jpg"><img src="assets/desktops/penrose.jpg" width="250" alt="The empty penrose desktop with its bar, from PARBS"></a>
+  <br>
+  <sub>KDE Plasma, Cinnamon and XFCE; LXQt, sway and dwm; penrose.</sub>
 </p>
 
 The desktop environments (KDE Plasma, Cinnamon, XFCE and LXQt) also come with the LibreWolf browser, Bluetooth, fonts for most languages and emoji, and the drivers for Intel and AMD graphics.
@@ -157,7 +159,7 @@ test/run-container-test.sh all --desktop all --full # a whole install for every 
 test/run-container-test.sh all --desktop sway --nvidia  # keep NVIDIA's driver in a run with sway
 DARBS_DIR=~/src/DARBS test/run-container-test.sh all --desktop dwm    # a local DARBS checkout
 SARBS_DIR=~/src/SARBS test/run-container-test.sh all --desktop sway   # a local SARBS checkout
-PENROSE_DIR=~/src/penrosewm test/run-container-test.sh all --desktop penrose  # a local penrosewm checkout
+PARBS_DIR=~/src/PARBS test/run-container-test.sh all --desktop penrose # a local PARBS checkout
 ```
 
 Every run checks whether the package lists of Plasma, Cinnamon, XFCE and LXQt still exist in the Artix repos.

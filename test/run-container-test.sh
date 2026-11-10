@@ -9,7 +9,7 @@
 #   --darbs          the same as --desktop dwm
 #   --full           a whole install for every desktop, not the base system
 #   --nvidia         NVIDIA's driver also when the run includes sway
-#   DARBS_DIR=~/src/DARBS SARBS_DIR=~/src/SARBS PENROSE_DIR=~/src/penrosewm
+#   DARBS_DIR=~/src/DARBS SARBS_DIR=~/src/SARBS PARBS_DIR=~/src/PARBS
 #                    test local checkouts instead of the ones on GitHub
 
 set -Eeuo pipefail
@@ -60,9 +60,9 @@ if [[ -n ${SARBS_DIR-} ]]; then
     SARBS_DIR=$(cd "$SARBS_DIR" && pwd)
     RICE_MOUNTS+=(-v "$SARBS_DIR:/sarbs:ro")
 fi
-if [[ -n ${PENROSE_DIR-} ]]; then
-    PENROSE_DIR=$(cd "$PENROSE_DIR" && pwd)
-    RICE_MOUNTS+=(-v "$PENROSE_DIR:/penrose:ro")
+if [[ -n ${PARBS_DIR-} ]]; then
+    PARBS_DIR=$(cd "$PARBS_DIR" && pwd)
+    RICE_MOUNTS+=(-v "$PARBS_DIR:/parbs:ro")
 fi
 mkdir -p out
 if [[ $DESKTOP_ARG == all && $STAGE == all ]]; then rm -f out/test-report.md out/test-report.pdf; fi
@@ -282,7 +282,7 @@ report_desktop() {
     if [[ $d == dwm || $d == sway || $d == penrose ]]; then
         rice=DARBS rice_dir=${DARBS_DIR-}
         [[ $d == sway ]] && rice=SARBS rice_dir=${SARBS_DIR-}
-        [[ $d == penrose ]] && rice=penrosewm rice_dir=${PENROSE_DIR-}
+        [[ $d == penrose ]] && rice=PARBS rice_dir=${PARBS_DIR-}
         if [[ -n $rice_dir ]]; then
             echo "- $rice: local checkout $rice_dir, commit $(git_info "$rice_dir")"
         else

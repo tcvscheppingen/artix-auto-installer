@@ -11,7 +11,7 @@
 #   * optional desktop: KDE Plasma, Cinnamon, XFCE or LXQt, or sway
 #     (https://github.com/tcvscheppingen/SARBS), dwm
 #     (https://github.com/tcvscheppingen/DARBS) or penrose, for advanced users
-#     (https://github.com/tcvscheppingen/penrosewm); without one it
+#     (https://github.com/tcvscheppingen/PARBS); without one it
 #     boots to a TTY
 #
 # For UEFI PCs and laptops with an Intel or AMD CPU. Run it as root from the
@@ -34,7 +34,7 @@ readonly LOG=/tmp/artix-install.log
 readonly AUR_WIKI="https://wiki.archlinux.org/title/Arch_User_Repository"
 readonly DARBS_URL="https://github.com/tcvscheppingen/DARBS"
 readonly SARBS_URL="https://github.com/tcvscheppingen/SARBS"
-readonly PENROSE_URL="https://github.com/tcvscheppingen/penrosewm"
+readonly PARBS_URL="https://github.com/tcvscheppingen/PARBS"
 # Passwordless sudo while the rice script runs
 readonly RICE_SUDOERS=/etc/sudoers.d/99-artix-install
 
@@ -314,7 +314,7 @@ desktop_packages() {
 rice_name() {
     case $1 in
         sway)    echo SARBS ;;
-        penrose) echo penrosewm ;;
+        penrose) echo PARBS ;;
         *)       echo DARBS ;;
     esac
 }
@@ -380,7 +380,7 @@ install_rice() {
     name=$(rice_name "$DESKTOP")
     case $DESKTOP in
         sway)    repo=${SARBS_REPO:-$SARBS_URL} ;;
-        penrose) repo=${PENROSE_REPO:-$PENROSE_URL} ;;
+        penrose) repo=${PARBS_REPO:-$PARBS_URL} ;;
         *)       repo=${DARBS_REPO:-$DARBS_URL} ;;
     esac
     dir=/home/$USER_NAME/$name
@@ -502,7 +502,7 @@ load_settings() {
     # Git URL or local checkout
     SARBS_REPO=${SARBS_REPO-}
     DARBS_REPO=${DARBS_REPO-}
-    PENROSE_REPO=${PENROSE_REPO-}
+    PARBS_REPO=${PARBS_REPO-}
 }
 
 start_logging() {
@@ -792,7 +792,7 @@ ask_desktop() {
     local desktop_preset=$DESKTOP penrose_sure
     info ""
     info "A desktop environment with its login screen, or my sway, dwm or penrose"
-    info "setup (SARBS/DARBS/penrosewm on GitHub). Without one the system boots"
+    info "setup (SARBS/DARBS/PARBS on GitHub). Without one the system boots"
     info "to a text console."
     while :; do
         ask_choice DESKTOP "Desktop" none \
@@ -809,7 +809,7 @@ ask_desktop() {
             info "It's my own window manager, built from Rust source during the install."
             info "You change its settings and key bindings in Rust (src/main.rs) and"
             info "build it again. It has no system tray, and when it doesn't start you"
-            info "fix it from the text console (see the README in ~/penrosewm)."
+            info "fix it from the text console (see the README in ~/PARBS)."
             [[ -n $desktop_preset ]] && break
             penrose_sure=""
             ask_yes_no penrose_sure "Install penrose anyway?" n
